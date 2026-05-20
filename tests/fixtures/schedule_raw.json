@@ -1,0 +1,12 @@
+{
+  "source": "jwch",
+  "raw_id": "fixture-schedule-001",
+  "course_name": "Synthetic Course",
+  "title": "Synthetic Lecture",
+  "content": "Weekly offline schedule fixture.",
+  "starts_at": "2026-03-02T08:00:00+08:00",
+  "ends_at": "2026-03-02T09:35:00+08:00",
+  "location": "Room 000",
+  "teacher": "Example Teacher"
+}
+

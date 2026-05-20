@@ -1,0 +1,15 @@
+{
+  "source": "learn",
+  "raw_id": "fixture-learn-notice-001",
+  "course_name": "Synthetic Course",
+  "title": "Offline Homework Notice",
+  "content": "<p>Please read the synthetic handout and submit a short report.</p>",
+  "published_at": "2026-01-02T09:00:00+08:00",
+  "attachments": [
+    {
+      "name": "synthetic-handout.pdf",
+      "download_url": "https://example.invalid/fixture/synthetic-handout.pdf"
+    }
+  ]
+}
+

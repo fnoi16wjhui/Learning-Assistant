@@ -1,0 +1,9 @@
+From: teacher@example.invalid
+To: student@example.invalid
+Subject: [Synthetic Course] Offline Notice
+Date: Fri, 02 Jan 2026 09:10:00 +0800
+Message-ID: <fixture-mail-001@example.invalid>
+
+This is a synthetic MIME-like fixture for parser tests.
+It contains no real mailbox content, account name, password, cookie, or course data.
+

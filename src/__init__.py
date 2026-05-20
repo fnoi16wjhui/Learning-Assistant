@@ -1,0 +1,2 @@
+"""Course Agent Collector package."""
+

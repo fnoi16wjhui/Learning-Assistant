@@ -1,0 +1,70 @@
+app:
+  name: course-agent-collector
+  timezone: Asia/Shanghai
+  environment: development
+
+channels:
+  learn:
+    enabled: true
+    adapter: learn
+    parser: learn_html
+    base_url: https://learn.tsinghua.edu.cn
+    timeout_seconds: 20
+    max_retries: 2
+  mail:
+    enabled: true
+    adapter: mail
+    parser: mail_mime
+    base_url: mails.tsinghua.edu.cn
+    imap_host: mails.tsinghua.edu.cn
+    imap_port: 993
+    use_ssl: true
+    mailbox: INBOX
+    timeout_seconds: 20
+    max_retries: 2
+  jwch:
+    enabled: true
+    adapter: jwch
+    parser: jwch_html
+    base_url: https://zhjw.cic.tsinghua.edu.cn
+    exam_url: https://zhjw.cic.tsinghua.edu.cn/jxmh.do?url=/jxmh.do&m=bks_ksSearch
+    schedule_url: https://zhjw.cic.tsinghua.edu.cn/portal3rd.do?url=/portal3rd.do&m=bks_yjkbSearch
+    timeout_seconds: 20
+    max_retries: 1
+
+storage:
+  sqlite_path: storage/app.db
+  export_jsonl_path: storage/course_tasks.jsonl
+  save_raw_payloads: false
+  raw_payload_dir: storage/raw
+  fingerprint_algorithm: sha256
+
+logging:
+  level: INFO
+  file_path: logs/collector.log
+  max_bytes: 10485760
+  backup_count: 5
+  redact_sensitive_values: true
+
+polling:
+  learn_interval_minutes: 30
+  mail_interval_minutes: 15
+  jwch_interval_minutes: 120
+  initial_delay_seconds: 5
+  retry_backoff_seconds: 5
+  max_backoff_seconds: 300
+
+parser:
+  default_encoding: utf-8
+  normalize_whitespace: true
+  strip_html: true
+  keep_attachment_urls: true
+  max_content_chars: 20000
+  mail:
+    prefer_plain_text: true
+    strip_signatures: true
+    strip_school_footers: true
+  learn:
+    prefer_json_api: true
+    extract_deadlines: true
+    extract_attachments: true
