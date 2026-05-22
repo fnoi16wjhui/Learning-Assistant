@@ -72,7 +72,7 @@ class JwchAdapter(BaseAdapter):
         self._session = self._session or self._build_session()
         self._load_info_cookies()
         login_url = self._portal_login_url()
-        if not self._has_info_session_cookie():
+        if not self._has_authenticated_info_session():
             self._login_with_password(login_url)
         self._bootstrap_zhjw_session(start_url)
         self._authenticated = True
@@ -216,6 +216,24 @@ class JwchAdapter(BaseAdapter):
                 return True
         return False
 
+    def _has_authenticated_info_session(self) -> bool:
+        """Return True only when the Info portal marks the session as logged in."""
+
+        if self._session is None or not self._has_info_session_cookie():
+            return False
+        portal_base = str(self.config.extra.get("portal_base_url") or "https://info.tsinghua.edu.cn").rstrip("/")
+        referer = str(
+            self.config.extra.get("portal_referer")
+            or portal_base + "/f/info/portal_fg/common/yyfwsearch?searchParam=%E8%80%83%E8%AF%95"
+        )
+        timeout = float(self.config.extra.get("timeout_seconds", 20))
+        try:
+            response = self._session.get(referer, timeout=timeout)
+            response.raise_for_status()
+        except Exception:
+            return False
+        return portal_page_is_logged_in(response.text)
+
     def _login_with_password(self, start_url: str) -> None:
         if self._session is None:
             raise AdapterError("jwch_adapter login failed: session is not initialized")
@@ -228,6 +246,8 @@ class JwchAdapter(BaseAdapter):
             raise AdapterError("jwch_adapter login entry fetch failed") from exc
 
         auth_url = discover_auth_form_url(entry_page.url, entry_page.text)
+        if not auth_url:
+            auth_url = self._discover_info_login_url(entry_page.url, entry_page.text)
         if auth_url:
             try:
                 auth_page = self._session.get(auth_url, timeout=timeout)
@@ -295,6 +315,29 @@ class JwchAdapter(BaseAdapter):
                 follow.raise_for_status()
             except Exception as exc:
                 raise AdapterError("jwch_adapter post-auth entry fetch failed") from exc
+
+    def _discover_info_login_url(self, current_url: str, html_text: str) -> str | None:
+        """Find the Info portal's ID login URL, including the language.js indirection."""
+
+        direct = extract_info_login_url(html_text)
+        if direct:
+            return urljoin(current_url, direct)
+        if self._session is None:
+            return None
+
+        timeout = float(self.config.extra.get("timeout_seconds", 20))
+        for script_url in discover_script_urls(current_url, html_text):
+            if "/f/lang/language.js" not in script_url:
+                continue
+            try:
+                response = self._session.get(script_url, timeout=timeout)
+                response.raise_for_status()
+            except Exception:
+                continue
+            discovered = extract_info_login_url(response.text)
+            if discovered:
+                return urljoin(response.url, discovered)
+        return None
 
     def _bootstrap_zhjw_session(self, target_url: str | None) -> None:
         """Use Info's online app redirect to mint a JWCH business session."""
@@ -454,6 +497,30 @@ def discover_post_auth_form(
                 dict(form.get("inputs", {})),
             )
     return None
+
+
+def discover_script_urls(current_url: str, html_text: str) -> list[str]:
+    """Return absolute script URLs referenced by an HTML page."""
+
+    urls: list[str] = []
+    for src in re.findall(r'<script[^>]+src=["\']([^"\']+)', html_text, flags=re.IGNORECASE):
+        absolute = urljoin(current_url, src)
+        if absolute not in urls:
+            urls.append(absolute)
+    return urls
+
+
+def extract_info_login_url(text: str) -> str | None:
+    """Extract the Info portal loginUrl JavaScript variable."""
+
+    match = re.search(r'loginUrl\s*=\s*["\']([^"\']+)["\']', text)
+    return html.unescape(match.group(1)) if match else None
+
+
+def portal_page_is_logged_in(text: str) -> bool:
+    """Detect Info portal login state from the public page JavaScript flag."""
+
+    return bool(re.search(r"\bloginFlag\s*=\s*true\b", text))
 
 
 def extract_roaming_url(data: dict[str, Any]) -> str | None:

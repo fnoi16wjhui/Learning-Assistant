@@ -23,6 +23,7 @@ Provide local developer utilities that verify architecture constraints and allow
 - Provide non-sensitive Mail login diagnostics for TCP/TLS/capabilities/common username forms.
 - Provide manual JWCH/Info exam and schedule raw page probes.
 - Provide manual JWCH/auth.cic double-auth probe with local ignored session and trust storage.
+- Provide local material parsing CLI for B-module file extraction and chunking.
 
 ## Acceptance Harness
 - Run `python scripts/run_harness.py` from the repository root.
