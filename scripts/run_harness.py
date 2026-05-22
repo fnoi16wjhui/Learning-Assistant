@@ -22,6 +22,7 @@ TASK_FILES = [
     "src/adapters/tasks.md",
     "src/parsers/tasks.md",
     "src/models/tasks.md",
+    "src/materials/tasks.md",
     "storage/tasks.md",
     "logs/tasks.md",
     "scripts/tasks.md",
@@ -275,6 +276,26 @@ def check_jwch_parser_contract() -> list[str]:
     return errors
 
 
+def check_material_parser_contract() -> list[str]:
+    errors: list[str] = []
+    try:
+        from src.materials.pipeline import parse_material_paths
+    except Exception as exc:
+        return [f"material parser import failed: {exc}"]
+
+    fixture = ROOT / "tests" / "fixtures" / "material_sample.md"
+    chunks, parse_errors = parse_material_paths([fixture], chunk_chars=300, overlap_chars=30)
+    if parse_errors:
+        errors.append(f"unexpected material parse errors: {parse_errors}")
+    if len(chunks) != 1:
+        errors.append(f"unexpected material chunk count: {len(chunks)}")
+    elif chunks[0].material_type != "markdown":
+        errors.append(f"unexpected material type: {chunks[0].material_type}")
+    elif "机器学习" not in chunks[0].text:
+        errors.append("material chunk text missing expected course content")
+    return errors
+
+
 def run_check(name: str, checker) -> list[str]:
     errors = checker()
     status = "PASS" if not errors else "FAIL"
@@ -295,6 +316,7 @@ def main() -> int:
         ("mail UID incremental harness", check_mail_uid_incremental),
         ("pipeline sync state contract", check_pipeline_sync_state_contract),
         ("jwch parser contract", check_jwch_parser_contract),
+        ("material parser contract", check_material_parser_contract),
     ]
     errors: list[str] = []
     for name, checker in checks:

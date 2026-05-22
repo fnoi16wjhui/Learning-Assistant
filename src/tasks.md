@@ -5,6 +5,7 @@ Provide the package boundary for the collector code owned by the data acquisitio
 
 ## Boundaries
 - `src/models/` owns Pydantic v2 data contracts only.
+- `src/materials/` owns local file extraction, text cleaning, and chunking for B-module course materials.
 - `src/pipeline.py` owns fingerprinting, SQLite deduplication, JSON serialization, and local logging setup.
 - This package must not hardcode student IDs, passwords, mailbox authorization codes, cookies, or API keys.
 - This package must not collapse the four-layer architecture from `Rules.md`: adapters fetch raw data, parsers clean raw data, models define contracts, and pipeline persists/deduplicates typed records.

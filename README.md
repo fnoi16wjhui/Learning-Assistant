@@ -257,6 +257,40 @@ python scripts\export_attachments.py --source mail --limit 50
 
 导出的文件保存在 `storage/attachments/`，导出清单保存在 `storage/attachments/manifest.jsonl`。这些路径都已被 `.gitignore` 忽略。
 
+## 课程资料解析
+
+B 模块负责把本地课程资料解析为 C 模块可索引的标准文本块。默认支持 TXT、Markdown、PDF、DOCX、PPTX；图片 OCR 需要额外安装本机 Tesseract；音频/视频转写需要可选的 `faster-whisper` 和 FFmpeg。
+
+解析 A 导出的附件：
+
+```powershell
+python scripts\parse_materials.py --manifest storage\attachments\manifest.jsonl --records-jsonl storage\learn.jsonl --output storage\material_chunks.jsonl
+```
+
+解析任意本地资料目录：
+
+```powershell
+python scripts\parse_materials.py --input path\to\course_materials --output storage\material_chunks.jsonl
+```
+
+先只检查解析数量、不写文件：
+
+```powershell
+python scripts\parse_materials.py --input tests\fixtures\material_sample.md --dry-run
+```
+
+输出为 `MaterialChunk` JSONL，核心字段包括：
+
+- `source_file`
+- `file_hash`
+- `material_type`
+- `course_name`
+- `title`
+- `page` / `slide`
+- `chunk_index`
+- `text`
+- `metadata`
+
 ## 输出格式
 
 所有同步命令输出 JSONL，每行是一条结构化记录。
