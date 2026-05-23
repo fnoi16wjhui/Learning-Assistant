@@ -1,0 +1,3 @@
+{"source":"learn","raw_id":"demo_homework_1","course_name":"通用课程","title":"第一次作业","content":"阅读课程资料并完成课后练习。","created_at":"2026-05-23T10:00:00+08:00","task_type":"homework","ddl":"2026-05-30T23:59:00+08:00","attachments":[{"name":"homework.pdf","download_url":"demo://homework.pdf"}]}
+{"source":"learn","raw_id":"demo_notice_1","course_name":"通用课程","title":"课程公告","content":"本周课程资料已经上传，请及时查看。","created_at":"2026-05-23T11:00:00+08:00","task_type":"notice","attachments":[]}
+{"source":"jwch","raw_id":"demo_schedule_1","course_name":"通用课程","title":"课堂安排","content":"第一讲：课程导论","created_at":"2026-05-23T12:00:00+08:00","schedule_type":"class","starts_at":"2026-05-24T08:00:00+08:00","ends_at":"2026-05-24T09:35:00+08:00","location":"教学楼 101","teacher":"任课教师","attachments":[]}
