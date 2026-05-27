@@ -44,7 +44,7 @@ def health() -> dict[str, Any]:
         "modules": {
             "A": module_a.sync_status()["status"],
             "B": module_b.parse_status()["status"],
-            "C": "mock",
+            "C": module_c.status()["status"],
             "D": "mock",
             "E": "ready",
         },

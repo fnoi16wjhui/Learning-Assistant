@@ -26,6 +26,7 @@ http://127.0.0.1:8000/docs
 
 ```powershell
 python scripts\verify_e_module.py
+python scripts\verify_knowledge.py
 ```
 
 ## 前端
@@ -59,6 +60,10 @@ $env:COLLECTOR_JSONL="storage/demo_collector.jsonl"
 $env:MATERIAL_CHUNKS_JSONL="storage/demo_material_chunks.jsonl"
 python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+首次启动时 C 模块会自动从 `MATERIAL_CHUNKS_JSONL` 构建知识库索引，索引文件保存在 `storage/knowledge_index/`。
+
+如需要指定知识库索引路径，可设置环境变量 `KNOWLEDGE_INDEX_DIR`（默认 `storage/knowledge_index`）。
 
 ## 关键文档
 

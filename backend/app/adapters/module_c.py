@@ -1,39 +1,55 @@
-"""Mock-first adapter for C-module knowledge base and retrieval."""
+"""Adapter for C-module knowledge base and retrieval.
+
+Reads B-module MaterialChunk JSONL, builds/loads indexes,
+and provides keyword/vector/hybrid search through a unified interface.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from backend.app.models import RetrievalRequest
+from backend.app.settings import BackendSettings, settings
+from src.knowledge.knowledge_base import KnowledgeBase
 
 
 class ModuleCAdapter:
-    """Expose C-module contracts while the real retrieval service is pending."""
+    """Expose C-module knowledge base and retrieval through E-module contracts."""
+
+    def __init__(self, config: BackendSettings = settings) -> None:
+        self._kb = KnowledgeBase(
+            index_dir=config.knowledge_index_dir,
+            chunks_jsonl=config.material_chunks_jsonl,
+        )
+        self._initialised = False
+
+    def _ensure_index(self) -> None:
+        """Lazy-build or load the knowledge base on first access."""
+        if self._initialised:
+            return
+        self._kb.build_if_needed()
+        self._initialised = True
 
     def status(self) -> dict[str, Any]:
-        return {
-            "status": "mock",
-            "indexed_chunks": 0,
-            "index_types": ["keyword", "vector", "hybrid"],
-            "filters": ["course_name", "material_type", "time_range"],
-            "message": "C module will replace this Mock with knowledge base status.",
-            "source_module": "C",
-        }
+        """Return knowledge base status."""
+        self._ensure_index()
+        return self._kb.status()
 
     def search(self, request: RetrievalRequest) -> dict[str, Any]:
-        course_name = request.course_name or "Unknown Course"
+        """Search the knowledge base and return results in E-module format."""
+        self._ensure_index()
+
+        items = self._kb.search(
+            query=request.query,
+            course_name=request.course_name,
+            top_k=request.top_k,
+            mode=request.mode,
+        )
+
+        status = "ready" if self._kb.is_built() else "missing"
         return {
             "query": request.query,
-            "items": [
-                {
-                    "chunk_id": "mock-c-1",
-                    "title": "Mock 知识片段",
-                    "course_name": course_name,
-                    "text": "这里是检索 Mock 结果。真实关键词、向量和混合检索由 C 模块补齐。",
-                    "score": 0.8,
-                    "citation": "C module Mock",
-                }
-            ][: request.top_k],
+            "items": items,
             "source_module": "C",
-            "status": "mock",
+            "status": status,
         }

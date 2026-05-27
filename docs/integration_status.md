@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | A | ready/missing | `backend/app/adapters/module_a.py` | 读取 `storage/collector.jsonl`、`storage/learn.jsonl`、`storage/mail.jsonl`、`storage/jwch.jsonl` 中的任务与课表记录 |
 | B | ready/missing | `backend/app/adapters/module_b.py` | 读取 `storage/material_chunks.jsonl` 中的标准化资料分块 |
-| C | mock | `backend/app/adapters/module_c.py` | 已定义知识库状态与检索接口，等待 C 替换真实知识库实现 |
+| C | ready (keyword) / in_progress (vector) | `backend/app/adapters/module_c.py` | 已实现 `src/knowledge/` 知识库核心：关键词索引（jieba+TF-IDF）可用；向量索引（sentence-transformers）为可选依赖 |
 | D | mock | `backend/app/adapters/module_d.py` | 已定义问答、总结、作业助手接口，等待 D 替换真实智能应用实现 |
 | E | ready | `backend/app/main.py`、`frontend/src/App.tsx` | 提供统一 API 和前端 Demo 页面 |
 

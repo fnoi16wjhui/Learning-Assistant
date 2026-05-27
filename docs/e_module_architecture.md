@@ -49,7 +49,7 @@ flowchart LR
 
 - 前端只调用 `backend` 的统一 API。
 - A/B 已有接口或 JSONL 产物直接适配，不重复实现内部逻辑。
-- C/D 未完成时先提供 Mock 适配器，字段保持与接口契约一致。
+- C 已完成知识库核心（`src/knowledge/`）提供真实检索；D 未完成时先提供 Mock 适配器，字段保持与接口契约一致。
 - 每条前端展示数据保留 `source_module` 或等价来源字段，方便联调和答辩说明。
 - 错误响应统一为 `code`、`message`、`source_module`、`detail`。
 

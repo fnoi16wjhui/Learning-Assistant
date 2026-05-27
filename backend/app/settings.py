@@ -22,6 +22,8 @@ class BackendSettings:
     jwch_jsonl: Path = PROJECT_ROOT / "storage" / "jwch.jsonl"
     material_chunks_jsonl: Path = PROJECT_ROOT / "storage" / "material_chunks.jsonl"
     demo_material_chunks_jsonl: Path = PROJECT_ROOT / "storage" / "demo_material_chunks.jsonl"
+    knowledge_index_dir: Path = PROJECT_ROOT / "storage" / "knowledge_index"
+
 
     @classmethod
     def from_env(cls) -> "BackendSettings":
@@ -37,6 +39,8 @@ class BackendSettings:
             demo_material_chunks_jsonl=Path(
                 os.getenv("DEMO_MATERIAL_CHUNKS_JSONL", root / "storage" / "demo_material_chunks.jsonl")
             ),
+            knowledge_index_dir=Path(os.getenv("KNOWLEDGE_INDEX_DIR", root / "storage" / "knowledge_index")),
+
         )
 
 

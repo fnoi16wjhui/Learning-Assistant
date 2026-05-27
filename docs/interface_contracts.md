@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | A | 已有采集 CLI、Pydantic 模型、JSONL 输出 | 读取 `CourseTask`、`ScheduleItem`、同步状态并适配为前端 API | 稳定任务中心结构，补同步状态与错误码 |
 | B | 已有资料解析脚本、`MaterialChunk` 输出 | 读取资料分块、解析状态、失败原因并适配为前端 API | 稳定标准化资料输出，补解析失败原因 |
-| C | 未完成或不稳定 | E 提供知识库状态与检索 Mock | 实现知识库状态、混合检索、元数据过滤 |
+| C | 已有 `src/knowledge/` 知识库核心、关键词/向量/混合检索 | 通过 `ModuleCAdapter` 读取真实知识库索引，返回检索结果 | 向量模型优化、增量更新、检索评测调优 |
 | D | 未完成或不稳定 | E 提供问答、总结、作业助手 Mock | 实现问答、引用溯源、总结、作业助手 |
 
 ## 通用响应
@@ -47,7 +47,7 @@
   "modules": {
     "A": "ready",
     "B": "ready",
-    "C": "mock",
+    "C": "ready",
     "D": "mock",
     "E": "ready"
   }
@@ -81,8 +81,8 @@
     "status": "ready"
   },
   "knowledge_status": {
-    "status": "mock",
-    "indexed_chunks": 0
+    "status": "ready",
+    "indexed_chunks": 12
   }
 }
 ```
@@ -220,10 +220,11 @@ Demo 阶段接收上传占位请求，真实解析由 B 模块实现。
 
 ```json
 {
-  "status": "mock",
-  "indexed_chunks": 0,
+  "status": "ready",
+  "indexed_chunks": 12,
+  "message": "Loaded index with 12 chunks.",
   "index_types": ["keyword", "vector", "hybrid"],
-  "filters": ["course_name", "material_type", "time_range"],
+  "filters": ["course_name", "material_type"],
   "source_module": "C"
 }
 ```
@@ -250,12 +251,12 @@ C 模块检索接口。
   "query": "课程重点是什么？",
   "items": [
     {
-      "chunk_id": "mock-1",
-      "title": "Mock 知识片段",
+      "chunk_id": "chunk_abc123def456",
+      "title": "课程导论资料",
       "course_name": "课程名",
-      "text": "这里是检索结果片段。",
-      "score": 0.8,
-      "citation": "Mock Source"
+      "text": "这里是知识库检索返回的真实结果片段。",
+      "score": 0.95,
+      "citation": "storage/attachments/demo.pdf"
     }
   ],
   "source_module": "C",
