@@ -7,6 +7,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
+# Load .env before any adapter imports so env vars are available at module level
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -45,7 +50,7 @@ def health() -> dict[str, Any]:
             "A": module_a.sync_status()["status"],
             "B": module_b.parse_status()["status"],
             "C": module_c.status()["status"],
-            "D": "mock",
+            "D": module_d.status(),
             "E": "ready",
         },
     }
