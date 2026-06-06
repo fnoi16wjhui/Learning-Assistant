@@ -8,8 +8,10 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from src.adapters.base_adapter import AdapterError, RawPayload
 from src.adapters.jwch_adapter import JwchAdapter
@@ -24,6 +26,7 @@ from src.pipeline import DeduplicationStore, configure_logging, filter_new_recor
 
 
 NETWORK_CHANNELS = {"learn", "mail", "jwch"}
+LEARN_LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 PipelineRecord = CourseTask | ScheduleItem
 
 
@@ -232,6 +235,7 @@ def sync_learn_business(
     semester_id = ((semester_data.get("result") or {}) if isinstance(semester_data, dict) else {}).get("xnxq")
     if not isinstance(semester_id, str) or not semester_id:
         raise ValueError("Learn current semester response missing result.xnxq")
+    semester_start = learn_semester_start(semester_id)
 
     locale = str(adapter.config.extra.get("locale") or "zh")
     course_payload, course_data = fetch_learn_json(
@@ -265,24 +269,69 @@ def sync_learn_business(
                 "raw_id": payload.raw_id,
                 "raw_id_prefix": payload.raw_id,
                 "content_type": payload.content_type,
+                "course_id": course_id,
                 "course_name": course_name,
                 "task_type": spec["task_type"],
+                "require_course_id_match": bool(spec.get("require_course_id_match")),
                 "base_url": adapter.require("base_url"),
                 "homework_attachment_url_template": "/b/wlxt/kczy/zy/student/downloadFile/{wlkcid}/{file_id}",
                 "notice_attachment_url_template": "/b/wlxt/kcgg/wlkc_ggb/student/downloadFile/{file_id}",
                 "file_attachment_url_template": "/b/wlxt/kj/wlkc_kjxxb/student/downloadFile?sfgk=0&wjid={file_id}",
             }
             parser_metadata.update(spec.get("metadata") or {})
-            records.extend(
-                parser.parse(
-                    payload.content,
-                    parser_metadata,
-                )
+            parsed_records = parser.parse(
+                payload.content,
+                parser_metadata,
             )
+            records.extend(filter_learn_records_for_semester(parsed_records, semester_start))
         courseware_payloads, courseware_records = sync_learn_courseware_files(adapter, parser, course_id, course_name)
         raw_payloads.extend(courseware_payloads)
         records.extend(courseware_records)
     return raw_payloads, records
+
+
+def learn_semester_start(semester_id: str) -> datetime | None:
+    """Infer a conservative current-term start from Learn's xnxq value."""
+
+    parts = semester_id.split("-")
+    if len(parts) < 3 or not parts[0].isdigit() or not parts[1].isdigit():
+        return None
+    first_year = int(parts[0])
+    second_year = int(parts[1])
+    term = parts[2].strip()
+    if term == "1":
+        return datetime(first_year, 9, 1, tzinfo=LEARN_LOCAL_TIMEZONE)
+    if term == "2":
+        return datetime(second_year, 2, 1, tzinfo=LEARN_LOCAL_TIMEZONE)
+    if term in {"3", "summer", "Summer"}:
+        return datetime(second_year, 7, 1, tzinfo=LEARN_LOCAL_TIMEZONE)
+    return None
+
+
+def filter_learn_records_for_semester(
+    records: list[PipelineRecord],
+    semester_start: datetime | None,
+) -> list[PipelineRecord]:
+    if semester_start is None:
+        return records
+    filtered: list[PipelineRecord] = []
+    for record in records:
+        if (
+            isinstance(record, CourseTask)
+            and record.source == "learn"
+            and record.task_type == "homework"
+            and record.ddl is not None
+            and normalize_datetime(record.ddl) < semester_start
+        ):
+            continue
+        filtered.append(record)
+    return filtered
+
+
+def normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=LEARN_LOCAL_TIMEZONE)
+    return value.astimezone(LEARN_LOCAL_TIMEZONE)
 
 
 def fetch_learn_json(
@@ -332,18 +381,21 @@ def default_learn_business_specs(course_id: str) -> list[dict[str, Any]]:
             "task_type": "homework",
             "endpoint": "/b/wlxt/kczy/zy/student/zyListWj",
             "params": common_params,
+            "require_course_id_match": True,
         },
         {
             "name": "homework_submitted_ungraded",
             "task_type": "homework",
             "endpoint": "/b/wlxt/kczy/zy/student/zyListYjwg",
             "params": common_params,
+            "require_course_id_match": True,
         },
         {
             "name": "homework_graded",
             "task_type": "homework",
             "endpoint": "/b/wlxt/kczy/zy/student/zyListYpg",
             "params": common_params,
+            "require_course_id_match": True,
         },
         {
             "name": "questionnaire",
@@ -396,6 +448,7 @@ def sync_learn_courseware_files(
                     "raw_id": payload.raw_id,
                     "raw_id_prefix": payload.raw_id,
                     "content_type": payload.content_type,
+                    "course_id": course_id,
                     "course_name": course_name,
                     "task_type": "file",
                     "base_url": adapter.require("base_url"),

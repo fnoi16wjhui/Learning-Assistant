@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from backend.app.adapters.jsonl import read_jsonl
 from backend.app.settings import BackendSettings, settings
@@ -11,6 +12,7 @@ from backend.app.settings import BackendSettings, settings
 
 TASK_TYPES = {"homework", "notice", "file", "questionnaire", "discussion", "exam"}
 SCHEDULE_TYPES = {"class", "exam", "office_hour", "other"}
+LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 class ModuleAAdapter:
@@ -22,7 +24,7 @@ class ModuleAAdapter:
     def task_records(self) -> list[dict[str, Any]]:
         records = self._all_records()
         tasks = [record for record in records if record.get("task_type") in TASK_TYPES]
-        return [self._with_source(record) for record in tasks]
+        return sorted([self._with_source(record) for record in tasks], key=self._task_sort_key)
 
     def schedule_records(self) -> list[dict[str, Any]]:
         records = self._all_records()
@@ -70,6 +72,31 @@ class ModuleAAdapter:
         return enriched
 
     @staticmethod
+    def _task_sort_key(record: dict[str, Any]) -> tuple[int, float, str]:
+        now = datetime.now(LOCAL_TIMEZONE)
+        ddl = parse_datetime(record.get("ddl"))
+        if ddl is not None:
+            if ddl >= now:
+                return (0, ddl.timestamp(), str(record.get("title") or ""))
+            return (2, -ddl.timestamp(), str(record.get("title") or ""))
+        created_at = parse_datetime(record.get("created_at"))
+        if created_at is not None:
+            return (1, -created_at.timestamp(), str(record.get("title") or ""))
+        return (1, 0.0, str(record.get("title") or ""))
+
+    @staticmethod
     def _modified_at(path: Any) -> str:
         timestamp = path.stat().st_mtime
         return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
+
+def parse_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=LOCAL_TIMEZONE)
+    return parsed.astimezone(LOCAL_TIMEZONE)

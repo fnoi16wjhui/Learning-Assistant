@@ -107,10 +107,16 @@ class LearnHtmlParser:
             records = [records]
 
         tasks: list[CourseTask] = []
+        expected_course_id = learn_record_course_id(meta)
+        require_course_id_match = bool(meta.get("require_course_id_match"))
         for index, item in enumerate(records):
             item = normalize_learn_record(item, meta)
             if not isinstance(item, dict):
                 continue
+            actual_course_id = learn_record_course_id(item)
+            if expected_course_id and (require_course_id_match or actual_course_id):
+                if actual_course_id != expected_course_id:
+                    continue
             title = first_non_empty(
                 as_optional_str(item.get("title")),
                 as_optional_str(item.get("name")),
@@ -160,11 +166,7 @@ class LearnHtmlParser:
                         or infer_task_type(content, title)
                     ),
                     raw_id=raw_id,
-                    course_name=(
-                        as_optional_str(item.get("course_name"))
-                        or as_optional_str(meta.get("course_name"))
-                        or "Unknown Course"
-                    ),
+                    course_name=learn_record_course_name(item) or as_optional_str(meta.get("course_name")) or "Unknown Course",
                     title=title,
                     content=content,
                     ddl=parse_learn_deadline(item, content, meta),
@@ -207,6 +209,24 @@ def extract_json_records(data: Any) -> Any:
             if isinstance(value, list):
                 return value
     return [data]
+
+
+def learn_record_course_id(item: Mapping[str, Any]) -> str | None:
+    for key in ("wlkcid", "wlkcId", "wlkc_id", "course_id", "courseId", "kcid", "idKc"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, int):
+            return str(value)
+    return None
+
+
+def learn_record_course_name(item: Mapping[str, Any]) -> str | None:
+    for key in ("course_name", "kcm", "ywkcm", "kcmc", "wlkcmc"):
+        value = as_optional_str(item.get(key))
+        if value:
+            return value
+    return None
 
 
 def normalize_learn_record(item: Any, metadata: Mapping[str, Any]) -> Any:

@@ -148,15 +148,52 @@ h2 {
 
 .record-list article {
   border: 1px solid #edf1f7;
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 14px;
   background: #fbfcff;
+}
+
+.record-list article.clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.record-list article.clickable:hover,
+.record-list article.selected {
+  border-color: #2f62ff;
+  background: #f5f8ff;
+  box-shadow: 0 8px 18px rgba(47, 98, 255, 0.08);
+}
+
+.record-list article.clickable:focus-visible {
+  outline: 3px solid rgba(47, 98, 255, 0.18);
+  outline-offset: 2px;
 }
 
 .record-list article div {
   display: flex;
   justify-content: space-between;
   gap: 12px;
+}
+
+.record-deadline-row {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.record-title-row {
+  align-items: flex-start;
+}
+
+.record-title-row strong {
+  line-height: 1.45;
+}
+
+.record-title-row em {
+  color: #5d6c89;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-style: normal;
 }
 
 .record-list article span {
@@ -167,6 +204,186 @@ h2 {
 .record-list p,
 .muted {
   color: #5d6c89;
+}
+
+.record-list p {
+  display: -webkit-box;
+  line-height: 1.6;
+  margin-bottom: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.task-workspace {
+  background: #fff;
+  border: 1px solid #e5eaf3;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.task-workspace-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.task-workspace-header h3 {
+  margin: 4px 0 0;
+  font-size: 24px;
+}
+
+.task-count {
+  border: 1px solid #d7dfed;
+  border-radius: 999px;
+  color: #44516a;
+  font-size: 13px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.task-center-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.task-center-grid .record-list {
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.task-detail {
+  border-left: 1px solid #e5eaf3;
+  min-width: 0;
+  padding-left: 18px;
+  position: sticky;
+  top: 24px;
+}
+
+.deadline-hero {
+  border-radius: 8px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.deadline-hero span {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.deadline-hero strong {
+  display: block;
+  font-size: 24px;
+  margin-top: 4px;
+}
+
+.deadline-pill {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
+.deadline-pill.upcoming,
+.deadline-hero.upcoming {
+  background: #eaf7ef;
+  color: #166534;
+}
+
+.deadline-pill.soon,
+.deadline-hero.soon {
+  background: #fff7d6;
+  color: #8a5a00;
+}
+
+.deadline-pill.overdue,
+.deadline-hero.overdue {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.deadline-pill.no-deadline,
+.deadline-hero.no-deadline {
+  background: #edf1f7;
+  color: #5d6c89;
+}
+
+.task-detail-title span {
+  color: #2f62ff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.task-detail-title h4 {
+  font-size: 22px;
+  line-height: 1.4;
+  margin: 6px 0;
+}
+
+.task-detail-title p {
+  color: #5d6c89;
+  margin: 0;
+}
+
+.task-detail-content {
+  color: #44516a;
+  line-height: 1.8;
+  margin-top: 18px;
+  white-space: pre-wrap;
+}
+
+.attachment-list {
+  border-top: 1px solid #edf1f7;
+  margin-top: 18px;
+  padding-top: 14px;
+}
+
+.attachment-list h5 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+.attachment-list a {
+  color: #2f62ff;
+  display: block;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.task-meta-list {
+  border-top: 1px solid #edf1f7;
+  color: #5d6c89;
+  display: grid;
+  gap: 8px;
+  margin: 18px 0 0;
+  padding-top: 14px;
+}
+
+.task-meta-list div {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.task-meta-list dt {
+  font-weight: 700;
+}
+
+.task-meta-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 textarea {
@@ -424,12 +641,28 @@ pre {
   }
 
   .grid,
-  header {
+  header,
+  .task-center-grid,
+  .task-workspace-header {
     display: block;
   }
 
   .panel,
   .stat-card {
     margin-bottom: 16px;
+  }
+
+  .task-detail {
+    border-left: 0;
+    border-top: 1px solid #e5eaf3;
+    margin-top: 18px;
+    padding-left: 0;
+    padding-top: 18px;
+    position: static;
+  }
+
+  .task-center-grid .record-list {
+    max-height: none;
+    padding-right: 0;
   }
 }

@@ -31,6 +31,7 @@ export function App() {
   const [active, setActive] = useState(sections[0]);
   const [dashboard, setDashboard] = useState<AnyRecord | null>(null);
   const [tasks, setTasks] = useState<AnyRecord[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState("");
   const [materials, setMaterials] = useState<AnyRecord[]>([]);
   const [health, setHealth] = useState<AnyRecord | null>(null);
 
@@ -57,7 +58,7 @@ export function App() {
   useEffect(() => {
     Promise.all([
       apiGet<AnyRecord>("/api/dashboard"),
-      apiGet<AnyRecord>("/api/tasks"),
+      apiGet<AnyRecord>("/api/tasks?limit=200"),
       apiGet<AnyRecord>("/api/materials"),
       apiGet<AnyRecord>("/api/health"),
     ])
@@ -73,6 +74,20 @@ export function App() {
   const stats = dashboard?.stats ?? {};
   const moduleBadges = useMemo(() => Object.entries(health?.modules ?? {}), [health]);
   const courses = useMemo(() => extractCourses(tasks), [tasks]);
+  const selectedTask = useMemo(
+    () => tasks.find((task) => taskRecordId(task) === selectedTaskId) ?? tasks[0] ?? null,
+    [tasks, selectedTaskId]
+  );
+
+  useEffect(() => {
+    if (!tasks.length) {
+      setSelectedTaskId("");
+      return;
+    }
+    if (!selectedTaskId || !tasks.some((task) => taskRecordId(task) === selectedTaskId)) {
+      setSelectedTaskId(taskRecordId(tasks[0]));
+    }
+  }, [tasks, selectedTaskId]);
 
   // ---- API calls ----------------------------------------------------------
 
@@ -176,7 +191,7 @@ export function App() {
             <StatCard title="资料片段" value={stats.material_count ?? 0} module="B" />
             <StatCard title="待处理作业" value={stats.pending_homework_count ?? 0} module="A/D" />
             <Panel title="最近任务">
-              <RecordList records={dashboard?.recent_tasks ?? []} empty="暂无 A 模块任务数据" />
+              <RecordList records={dashboard?.recent_tasks ?? []} empty="暂无 A 模块任务数据" showDeadline />
             </Panel>
             <Panel title="同步与知识库状态">
               <RecordList records={[...(dashboard?.sync_status ?? []), dashboard?.knowledge_status].filter(Boolean)} />
@@ -187,9 +202,12 @@ export function App() {
         {/* ============ 任务中心 =========================================== */}
 
         {active === "任务中心" && (
-          <Panel title="A 模块任务中心">
-            <RecordList records={tasks} empty="等待 A 模块提供任务、公告、作业和附件数据" />
-          </Panel>
+          <TaskCenter
+            tasks={tasks}
+            selectedTask={selectedTask}
+            selectedTaskId={selectedTaskId}
+            onSelect={(task) => setSelectedTaskId(taskRecordId(task))}
+          />
         )}
 
         {/* ============ 资料页 ============================================= */}
@@ -450,19 +468,167 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function RecordList({ records, empty = "暂无数据" }: { records: AnyRecord[]; empty?: string }) {
+function TaskCenter({
+  tasks,
+  selectedTask,
+  selectedTaskId,
+  onSelect,
+}: {
+  tasks: AnyRecord[];
+  selectedTask: AnyRecord | null;
+  selectedTaskId: string;
+  onSelect: (task: AnyRecord) => void;
+}) {
+  return (
+    <section className="task-workspace">
+      <div className="task-workspace-header">
+        <div>
+          <span className="eyebrow">Module A</span>
+          <h3>A 模块任务中心</h3>
+        </div>
+        <span className="task-count">{tasks.length} 条任务</span>
+      </div>
+      {!tasks.length ? (
+        <p className="muted">等待 A 模块提供任务、公告、作业和附件数据</p>
+      ) : (
+        <div className="task-center-grid">
+          <RecordList
+            records={tasks}
+            empty="等待 A 模块提供任务、公告、作业和附件数据"
+            limit={tasks.length}
+            selectedId={selectedTaskId}
+            onSelect={onSelect}
+          />
+          <TaskDetail task={selectedTask} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TaskDetail({ task }: { task: AnyRecord | null }) {
+  if (!task) return null;
+  const attachments = Array.isArray(task.attachments) ? task.attachments : [];
+  return (
+    <aside className="task-detail" aria-live="polite">
+      <div className={`deadline-hero ${deadlineTone(task.ddl)}`}>
+        <span>DDL</span>
+        <strong>{formatDeadline(task.ddl)}</strong>
+      </div>
+      <div className="task-detail-title">
+        <span>{task.task_type ?? task.source_module ?? "task"}</span>
+        <h4>{task.title ?? task.course_name ?? "未命名任务"}</h4>
+        <p>{task.course_name ?? "Unknown Course"}</p>
+      </div>
+      <div className="task-detail-content">
+        {task.content || task.message || task.text || "暂无详细内容"}
+      </div>
+      {attachments.length > 0 && (
+        <div className="attachment-list">
+          <h5>附件</h5>
+          {attachments.map((attachment: AnyRecord, index: number) => (
+            <a key={`${attachment.download_url ?? attachment.name ?? index}`} href={attachment.download_url} target="_blank" rel="noreferrer">
+              {attachment.name ?? `附件 ${index + 1}`}
+            </a>
+          ))}
+        </div>
+      )}
+      <dl className="task-meta-list">
+        <div>
+          <dt>来源</dt>
+          <dd>{task.source ?? task.source_module ?? "A"}</dd>
+        </div>
+        <div>
+          <dt>记录 ID</dt>
+          <dd>{task.raw_id ?? task.id ?? "无"}</dd>
+        </div>
+      </dl>
+    </aside>
+  );
+}
+
+function RecordList({
+  records,
+  empty = "暂无数据",
+  limit = 8,
+  selectedId,
+  onSelect,
+  showDeadline = false,
+}: {
+  records: AnyRecord[];
+  empty?: string;
+  limit?: number;
+  selectedId?: string;
+  onSelect?: (record: AnyRecord) => void;
+  showDeadline?: boolean;
+}) {
   if (!records.length) return <p className="muted">{empty}</p>;
   return (
     <div className="record-list">
-      {records.slice(0, 8).map((record, index) => (
-        <article key={`${record.raw_id ?? record.title ?? index}`}>
-          <div>
+      {records.slice(0, limit).map((record, index) => {
+        const id = taskRecordId(record);
+        const isSelected = selectedId === id;
+        const showDeadlineRow = showDeadline || Boolean(onSelect) || Boolean(record.ddl);
+        return (
+        <article
+          key={`${record.raw_id ?? record.title ?? index}`}
+          className={`${onSelect ? "clickable" : ""} ${isSelected ? "selected" : ""}`}
+          onClick={() => onSelect?.(record)}
+          tabIndex={onSelect ? 0 : undefined}
+          onKeyDown={(event) => {
+            if (!onSelect) return;
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onSelect(record);
+            }
+          }}
+        >
+          {showDeadlineRow && (
+            <div className="record-deadline-row">
+              <span className={`deadline-pill ${deadlineTone(record.ddl)}`}>{formatDeadline(record.ddl)}</span>
+              <span>{record.source_module ?? record.status ?? "E"}</span>
+            </div>
+          )}
+          <div className="record-title-row">
             <strong>{record.title ?? record.course_name ?? record.channel ?? record.source_file ?? "未命名记录"}</strong>
-            <span>{record.source_module ?? record.status ?? "E"}</span>
+            {record.course_name && <em>{record.course_name}</em>}
           </div>
           <p>{record.content ?? record.text ?? record.message ?? record.status ?? "已接入统一接口"}</p>
         </article>
-      ))}
+        );
+      })}
     </div>
   );
+}
+
+function taskRecordId(record: AnyRecord): string {
+  return String(
+    record.raw_id ??
+      record.id ??
+      `${record.source ?? "task"}:${record.task_type ?? ""}:${record.course_name ?? ""}:${record.title ?? ""}`
+  );
+}
+
+function formatDeadline(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "无 DDL";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `DDL ${date.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })}`;
+}
+
+function deadlineTone(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "no-deadline";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "no-deadline";
+  const now = new Date();
+  const diff = date.getTime() - now.getTime();
+  if (diff < 0) return "overdue";
+  if (diff <= 1000 * 60 * 60 * 24 * 3) return "soon";
+  return "upcoming";
 }
