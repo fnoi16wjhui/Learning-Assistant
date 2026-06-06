@@ -1,0 +1,330 @@
+{
+  "created_at": "2026-06-05T20:42:31.010621+08:00",
+  "inputs": [
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e88ca03871018ccbf2d7183972_1_ä½ä¸çº¸ 23.pdf",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e7937624100193f754460a3606_1_ç¬¬åå ­å¨ä½ä¸-æäº¤.pdf",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e8970a3c030197f4c8482d5447_1_å¤§ä½ä¸èªè¯è¡¨_2023012862_éæ·é®.xlsx",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e7970a3b950197e88cfcee39f5_1_2023012862_zhengqijian_hw2.zip",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79df9f506019e2a99e44c2e15_1_2023012862éæ·é®.zip",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79b4a6ced019b687de80f2108_1_15éæ·é®.pptx",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79df9f506019e06a243176129_1_2023012862_éæ·é®.zip",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78e5b1532018ee4860cc61103_1_xå°çº¿dræåç©è´¨è¯å«ææ¯ä¼å¿æµ æ.doc",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79df9f506019e159c41da5b0f_1_ç®æ³ç¬¬ä¹æ¬¡ä½ä¸.pdf",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78e5b1532018ee485928c109e_1_é¾å¼æåº.docx",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79d905ee9019d99d3292e74d2_1_ç¬¬å «å¨ä½ä¸-æäº¤.pdf",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78bccbccb018bebf5d92d22f6_1_éå¾·æ¯ææ ·çå­å¨.docx",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79ae36f80019b0be029ac24b0_1_è½¯ä»¶ä½ä¸æäº¤.zip",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e8970a3c030197ab742cad5a80_1_qtå¤§ä½ä¸æäº¤.zip",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78bccbccb018be038bd9d0c33_1_è®ºâéå¾·å·æ¼ âç°è±¡çäº§çåæ°æ¶ä»£å¾·è²åå±æ¹å.docx",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e88e5b154c018ea2fef9e96c3e_1_çå½¢æå¡é©¬å ââæç»çæ ¸èåååºå ï¼.doc",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e88e08ae49018e4b4b54df0f7c_1_ç¬¬åå¨ç è®¨è¯¾ç è®¨æ»ç».docx",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e89ae36fce019b17fdbfce03f1_1_æ°æ®ç»æç¬¬åæ¬¡ojæ¥å.pdf",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78e5b1532018e75b4f46075cf_1_xå°çº¿å¨å»å­¦è¯æ­çåºç¨.doc",
+    "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78e08ae13018e5456bd4e59df_1_ç¬¬åæ¬¡å·¥æ¦.docx"
+  ],
+  "output": "storage\\material_chunks.jsonl",
+  "chunk_chars": 900,
+  "overlap_chars": 120,
+  "incremental": false,
+  "files_input": 20,
+  "files_parsed": 11,
+  "files_skipped": 9,
+  "files_skipped_unchanged": 0,
+  "files_skipped_unsupported": 9,
+  "files_failed": 0,
+  "chunks_parsed": 42,
+  "chunks_written": 42,
+  "errors": [],
+  "files": [
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e88ca03871018ccbf2d7183972_1_ä½ä¸çº¸ 23.pdf",
+      "material_type": "pdf",
+      "status": "parsed",
+      "file_hash": "b13f805ab8ee9d482c2af43b5843a39a397a06aaa87d28e64a85e9182ac89cb9",
+      "chunks": 2,
+      "extracted_chars": 921,
+      "segment_count": 2,
+      "metadata_matched": true,
+      "extraction_methods": [
+        "pdf_ocr"
+      ],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e7937624100193f754460a3606_1_ç¬¬åå ­å¨ä½ä¸-æäº¤.pdf",
+      "material_type": "pdf",
+      "status": "parsed",
+      "file_hash": "2f710850d530097f66814458790cb5b03cc0e3dcf7bf7f2838c5fdd5f3778b59",
+      "chunks": 3,
+      "extracted_chars": 2035,
+      "segment_count": 1,
+      "metadata_matched": true,
+      "extraction_methods": [
+        "pdf_ocr"
+      ],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e8970a3c030197f4c8482d5447_1_å¤§ä½ä¸èªè¯è¡¨_2023012862_éæ·é®.xlsx",
+      "material_type": "unknown",
+      "status": "skipped_unsupported",
+      "file_hash": null,
+      "chunks": 0,
+      "extracted_chars": 0,
+      "segment_count": 0,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [
+        "unsupported_suffix: .xlsx"
+      ],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e7970a3b950197e88cfcee39f5_1_2023012862_zhengqijian_hw2.zip",
+      "material_type": "unknown",
+      "status": "skipped_unsupported",
+      "file_hash": null,
+      "chunks": 0,
+      "extracted_chars": 0,
+      "segment_count": 0,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [
+        "unsupported_suffix: .zip"
+      ],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79df9f506019e2a99e44c2e15_1_2023012862éæ·é®.zip",
+      "material_type": "unknown",
+      "status": "skipped_unsupported",
+      "file_hash": null,
+      "chunks": 0,
+      "extracted_chars": 0,
+      "segment_count": 0,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [
+        "unsupported_suffix: .zip"
+      ],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79b4a6ced019b687de80f2108_1_15éæ·é®.pptx",
+      "material_type": "pptx",
+      "status": "parsed",
+      "file_hash": "96c147018eb34c80fa6c70152f393343aa2db061c17572203e725dbd7e04632d",
+      "chunks": 12,
+      "extracted_chars": 2000,
+      "segment_count": 12,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79df9f506019e06a243176129_1_2023012862_éæ·é®.zip",
+      "material_type": "unknown",
+      "status": "skipped_unsupported",
+      "file_hash": null,
+      "chunks": 0,
+      "extracted_chars": 0,
+      "segment_count": 0,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [
+        "unsupported_suffix: .zip"
+      ],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78e5b1532018ee4860cc61103_1_xå°çº¿dræåç©è´¨è¯å«ææ¯ä¼å¿æµ æ.doc",
+      "material_type": "unknown",
+      "status": "skipped_unsupported",
+      "file_hash": null,
+      "chunks": 0,
+      "extracted_chars": 0,
+      "segment_count": 0,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [
+        "unsupported_suffix: .doc"
+      ],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79df9f506019e159c41da5b0f_1_ç®æ³ç¬¬ä¹æ¬¡ä½ä¸.pdf",
+      "material_type": "pdf",
+      "status": "parsed",
+      "file_hash": "39b1e9d09a8e41626f0ed3d8e7058dd7ca23ebb0289693924a9c070ea2400c4e",
+      "chunks": 2,
+      "extracted_chars": 887,
+      "segment_count": 2,
+      "metadata_matched": true,
+      "extraction_methods": [
+        "pypdf"
+      ],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78e5b1532018ee485928c109e_1_é¾å¼æåº.docx",
+      "material_type": "docx",
+      "status": "parsed",
+      "file_hash": "a082e8bac62b690b1a4df22f453d17af6a48db6a28b3e9ef0ddac18d7633fce2",
+      "chunks": 1,
+      "extracted_chars": 827,
+      "segment_count": 1,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79d905ee9019d99d3292e74d2_1_ç¬¬å «å¨ä½ä¸-æäº¤.pdf",
+      "material_type": "pdf",
+      "status": "parsed",
+      "file_hash": "872c4a6cc707b22c9d656c9bfac57ed7a2712699bb50fd4dd616f36bf5c9eeaf",
+      "chunks": 7,
+      "extracted_chars": 4107,
+      "segment_count": 7,
+      "metadata_matched": true,
+      "extraction_methods": [
+        "pdf_ocr"
+      ],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78bccbccb018bebf5d92d22f6_1_éå¾·æ¯ææ ·çå­å¨.docx",
+      "material_type": "docx",
+      "status": "parsed",
+      "file_hash": "0c42be702044f33e87a351c12a6cb3ae5ec1048af23cd0ca7f79943b8e1ebd03",
+      "chunks": 2,
+      "extracted_chars": 1439,
+      "segment_count": 1,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e79ae36f80019b0be029ac24b0_1_è½¯ä»¶ä½ä¸æäº¤.zip",
+      "material_type": "unknown",
+      "status": "skipped_unsupported",
+      "file_hash": null,
+      "chunks": 0,
+      "extracted_chars": 0,
+      "segment_count": 0,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [
+        "unsupported_suffix: .zip"
+      ],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e8970a3c030197ab742cad5a80_1_qtå¤§ä½ä¸æäº¤.zip",
+      "material_type": "unknown",
+      "status": "skipped_unsupported",
+      "file_hash": null,
+      "chunks": 0,
+      "extracted_chars": 0,
+      "segment_count": 0,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [
+        "unsupported_suffix: .zip"
+      ],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78bccbccb018be038bd9d0c33_1_è®ºâéå¾·å·æ¼ âç°è±¡çäº§çåæ°æ¶ä»£å¾·è²åå±æ¹å.docx",
+      "material_type": "docx",
+      "status": "parsed",
+      "file_hash": "8f04ef7201c5c63950260b64e4224ab935bbc3dfb0425f2591b21b4e2663f38a",
+      "chunks": 5,
+      "extracted_chars": 3394,
+      "segment_count": 1,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e88e5b154c018ea2fef9e96c3e_1_çå½¢æå¡é©¬å ââæç»çæ ¸èåååºå ï¼.doc",
+      "material_type": "unknown",
+      "status": "skipped_unsupported",
+      "file_hash": null,
+      "chunks": 0,
+      "extracted_chars": 0,
+      "segment_count": 0,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [
+        "unsupported_suffix: .doc"
+      ],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e88e08ae49018e4b4b54df0f7c_1_ç¬¬åå¨ç è®¨è¯¾ç è®¨æ»ç».docx",
+      "material_type": "docx",
+      "status": "parsed",
+      "file_hash": "abfaec9e0df209f055f6bc8edfbe7fd1ccb32e891b3adc4c1ffeabd9693f0ee2",
+      "chunks": 2,
+      "extracted_chars": 1602,
+      "segment_count": 1,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e89ae36fce019b17fdbfce03f1_1_æ°æ®ç»æç¬¬åæ¬¡ojæ¥å.pdf",
+      "material_type": "pdf",
+      "status": "parsed",
+      "file_hash": "fb692eaeb55e9b43b2229653589b9495a8ee4fd20c94c349d44def387537d953",
+      "chunks": 5,
+      "extracted_chars": 1017,
+      "segment_count": 5,
+      "metadata_matched": true,
+      "extraction_methods": [
+        "pdf_ocr",
+        "pypdf",
+        "pypdf_low_text"
+      ],
+      "warnings": [],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78e5b1532018e75b4f46075cf_1_xå°çº¿å¨å»å­¦è¯æ­çåºç¨.doc",
+      "material_type": "unknown",
+      "status": "skipped_unsupported",
+      "file_hash": null,
+      "chunks": 0,
+      "extracted_chars": 0,
+      "segment_count": 0,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [
+        "unsupported_suffix: .doc"
+      ],
+      "error": null
+    },
+    {
+      "source_file": "c:\\users\\27832\\desktop\\project\\agent\\learning-assistant\\storage\\attachments\\learn\\learn_homework_submitted_ungraded_2025-2026-2151369145_26ef84e78e08ae13018e5456bd4e59df_1_ç¬¬åæ¬¡å·¥æ¦.docx",
+      "material_type": "docx",
+      "status": "parsed",
+      "file_hash": "b9d570dfa2a51397c122de609922b2da86b94832802c8ce60c3abbd02cd4c54c",
+      "chunks": 1,
+      "extracted_chars": 740,
+      "segment_count": 1,
+      "metadata_matched": true,
+      "extraction_methods": [],
+      "warnings": [],
+      "error": null
+    }
+  ]
+}

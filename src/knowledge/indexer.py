@@ -135,10 +135,12 @@ def _load_chunks_from_jsonl(jsonl_path: str | Path) -> list[KnowledgeChunk]:
             if not isinstance(raw, dict):
                 continue
 
-            chunk_id = _stable_chunk_id(raw)
+            chunk_id = raw.get("chunk_id")
+            if not isinstance(chunk_id, str) or not chunk_id.strip():
+                chunk_id = _stable_chunk_id(raw)
             chunks.append(
                 KnowledgeChunk(
-                    chunk_id=chunk_id,
+                    chunk_id=chunk_id.strip(),
                     source_file=raw.get("source_file", ""),
                     file_hash=raw.get("file_hash", ""),
                     material_type=raw.get("material_type", "unknown"),

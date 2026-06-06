@@ -56,6 +56,7 @@ class MaterialSegment(MaterialModel):
 class MaterialChunk(MaterialModel):
     """Standardized chunk passed from B to C for indexing."""
 
+    chunk_id: str = Field(..., min_length=1, description="Stable unique chunk identifier.")
     source_file: str = Field(..., description="Original local file path.")
     file_hash: str = Field(..., description="SHA-256 hash of the file bytes.")
     material_type: MaterialType = Field(..., description="Normalized source file type.")
@@ -65,6 +66,9 @@ class MaterialChunk(MaterialModel):
     slide: int | None = None
     section_title: str | None = None
     chunk_index: int = Field(..., ge=0)
+    start_char: int | None = Field(default=None, ge=0)
+    end_char: int | None = Field(default=None, ge=0)
+    text_hash: str = Field(..., description="SHA-256 hash of the chunk text.")
     text: str = Field(..., min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=local_now)

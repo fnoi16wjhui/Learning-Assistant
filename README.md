@@ -259,12 +259,18 @@ python scripts\export_attachments.py --source mail --limit 50
 
 ## 课程资料解析
 
-B 模块负责把本地课程资料解析为 C 模块可索引的标准文本块。默认支持 TXT、Markdown、PDF、DOCX、PPTX；图片 OCR 需要额外安装本机 Tesseract；音频/视频转写需要可选的 `faster-whisper` 和 FFmpeg。
+B 模块负责把本地课程资料解析为 C 模块可索引的标准文本块。默认支持 TXT、Markdown、PDF、DOCX、PPTX；图片 OCR 需要额外安装本机 Tesseract；音频/视频转写需要可选的 `faster-whisper` 和 FFmpeg。PDF 会优先抽取可选文本；当页面文本过少时，会尝试通过 `pdf2image` + Tesseract 做 OCR 回退。
 
 解析 A 导出的附件：
 
 ```powershell
 python scripts\parse_materials.py --manifest storage\attachments\manifest.jsonl --records-jsonl storage\learn.jsonl --output storage\material_chunks.jsonl
+```
+
+增量解析，跳过 `storage/material_chunks.jsonl` 中已有 `file_hash` 的文件，并自动去重：
+
+```powershell
+python scripts\parse_materials.py --manifest storage\attachments\manifest.jsonl --records-jsonl storage\learn.jsonl --output storage\material_chunks.jsonl --incremental
 ```
 
 解析任意本地资料目录：
@@ -281,6 +287,7 @@ python scripts\parse_materials.py --input tests\fixtures\material_sample.md --dr
 
 输出为 `MaterialChunk` JSONL，核心字段包括：
 
+- `chunk_id`
 - `source_file`
 - `file_hash`
 - `material_type`
@@ -288,8 +295,12 @@ python scripts\parse_materials.py --input tests\fixtures\material_sample.md --dr
 - `title`
 - `page` / `slide`
 - `chunk_index`
+- `start_char` / `end_char`
+- `text_hash`
 - `text`
 - `metadata`
+
+每次非 dry-run 解析还会生成 `storage/material_parse_report.json`，记录每个文件的解析状态、抽取字符数、chunk 数、抽取方式、失败原因和增量跳过情况。
 
 ## 输出格式
 

@@ -279,7 +279,13 @@ def check_jwch_parser_contract() -> list[str]:
 def check_material_parser_contract() -> list[str]:
     errors: list[str] = []
     try:
-        from src.materials.pipeline import parse_material_paths
+        from src.materials.pipeline import (
+            build_parse_report,
+            load_existing_file_hashes,
+            parse_material_paths,
+            parse_material_paths_with_report,
+            write_chunks_jsonl,
+        )
     except Exception as exc:
         return [f"material parser import failed: {exc}"]
 
@@ -293,6 +299,47 @@ def check_material_parser_contract() -> list[str]:
         errors.append(f"unexpected material type: {chunks[0].material_type}")
     elif "机器学习" not in chunks[0].text:
         errors.append("material chunk text missing expected course content")
+    elif not chunks[0].chunk_id.startswith("material_"):
+        errors.append(f"material chunk_id is not stable B-module id: {chunks[0].chunk_id}")
+    elif len(chunks[0].text_hash) != 64:
+        errors.append("material text_hash is not a SHA-256 hex digest")
+
+    reported_chunks, reported_errors, file_reports = parse_material_paths_with_report(
+        [fixture], chunk_chars=300, overlap_chars=30
+    )
+    if reported_errors:
+        errors.append(f"unexpected material report errors: {reported_errors}")
+    if not file_reports or file_reports[0].status != "parsed":
+        errors.append("material parse report missing parsed file status")
+    elif file_reports[0].chunks != len(reported_chunks):
+        errors.append("material parse report chunk count does not match parsed chunks")
+
+    report = build_parse_report(
+        inputs=[fixture],
+        output="storage/material_chunks.jsonl",
+        chunk_chars=300,
+        overlap_chars=30,
+        incremental=False,
+        chunks_parsed=len(reported_chunks),
+        chunks_written=len(reported_chunks),
+        errors=[],
+        file_reports=file_reports,
+    )
+    if report.files_input != 1 or report.files_parsed != 1:
+        errors.append("material aggregate report counts are incorrect")
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output = Path(tmpdir) / "chunks.jsonl"
+        written = write_chunks_jsonl(reported_chunks, output)
+        appended = write_chunks_jsonl(reported_chunks, output, append=True, dedupe=True)
+        if written != len(reported_chunks):
+            errors.append("material initial JSONL write count is incorrect")
+        if appended != 0:
+            errors.append("material append dedupe did not suppress duplicate chunks")
+        if not load_existing_file_hashes(output):
+            errors.append("material existing file hash loader returned no hashes")
     return errors
 
 
