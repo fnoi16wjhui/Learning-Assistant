@@ -14,6 +14,7 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 from src.models import Attachment, CourseTask
+from src.models.base import local_now
 from src.parsers.learn_html import parse_datetime_hint
 
 
@@ -62,6 +63,7 @@ class MailMimeParser:
             content,
         )
 
+        sent_at = parse_mail_date(message.get("Date"))
         return [
             CourseTask(
                 source=self.source,
@@ -70,6 +72,7 @@ class MailMimeParser:
                 course_name=as_optional_str(meta.get("course_name")) or infer_course_name(subject) or "Unknown Course",
                 title=subject,
                 content=content,
+                created_at=sent_at or local_now(),
                 ddl=parse_deadline(content),
                 attachments=extract_attachments(message, raw_id),
             )

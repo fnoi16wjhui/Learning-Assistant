@@ -460,7 +460,48 @@ def fetch_learn_json(
         method=method,
     )
     text = payload.content if isinstance(payload.content, str) else payload.content.decode("utf-8", errors="replace")
-    data = json.loads(text)
+    stripped = text.lstrip()
+    metadata = payload.metadata if isinstance(payload.metadata, dict) else {}
+    content_type = str(metadata.get("content_type") or payload.content_type or "")
+    final_url = str(metadata.get("url") or "")
+    preview = " ".join(stripped.split())[:200]
+
+    if stripped.startswith("<") or "text/html" in content_type.lower():
+        logging.error(
+            "learn_non_json_response endpoint=%s status=%s url=%s preview=%s",
+            endpoint,
+            metadata.get("status_code"),
+            final_url,
+            preview,
+        )
+        if "login_timeout" in final_url.lower():
+            raise AdapterError(
+                "learn_adapter session expired (login_timeout). "
+                "Re-run scripts/probe_learn_double_auth.py to trust this device, then sync again."
+            )
+        if any(token in stripped.lower() for token in ("login", "登录", "i_user", "i_pass", "password")):
+            raise AdapterError(
+                "learn_adapter authentication failed: endpoint returned login HTML instead of JSON. "
+                "Check LEARN_USERNAME/LEARN_PASSWORD or trust-device requirements."
+            )
+        raise AdapterError(
+            f"learn_adapter endpoint returned HTML instead of JSON: endpoint={endpoint} preview={preview[:120]}"
+        )
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        logging.error(
+            "learn_json_decode_failed endpoint=%s status=%s url=%s preview=%s",
+            endpoint,
+            metadata.get("status_code"),
+            final_url,
+            preview,
+        )
+        raise AdapterError(
+            f"learn_adapter endpoint returned non-JSON response: endpoint={endpoint} preview={preview[:120]}"
+        ) from exc
+
     if not isinstance(data, dict):
         raise ValueError(f"Learn endpoint did not return a JSON object: {endpoint}")
     return payload, data

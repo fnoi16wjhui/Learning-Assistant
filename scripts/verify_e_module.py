@@ -20,9 +20,12 @@ def main() -> int:
     checks = [
         ("GET", "/api/health", None),
         ("GET", "/api/dashboard", None),
+        ("GET", "/api/settings/status", None),
+        ("GET", "/api/system/check", None),
         ("GET", "/api/tasks", None),
         ("GET", "/api/materials", None),
         ("GET", "/api/knowledge/status", None),
+        ("POST", "/api/retrieval/search", {"query": "demo", "top_k": 3, "mode": "keyword"}),
         ("POST", "/api/qa", {"question": "Demo question"}),
         ("POST", "/api/summaries", {"topic": "Demo topic"}),
         ("POST", "/api/homework-assistant", {"question": "Demo homework"}),

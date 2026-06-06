@@ -13,16 +13,11 @@ Module dependencies (D → ABC):
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import re
-import time
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from typing import Any
 
-import jieba
 import openai
 
 from backend.app.models import HomeworkAssistantRequest, QARequest, SummaryRequest
@@ -30,92 +25,46 @@ from backend.app.settings import settings
 from src.knowledge.knowledge_base import KnowledgeBase
 
 # ---------------------------------------------------------------------------
-# LLM config (reloadable — file overrides env, API can update at runtime)
+# LLM config
 # ---------------------------------------------------------------------------
 
-_LLM_CONFIG_FILE = Path(__file__).resolve().parents[3] / "storage" / "llm_config.json"
-_LLM_CONFIG_DEFAULTS: dict[str, Any] = {
-    "base_url": "https://llmapi.paratera.com",
-    "api_key": "",
-    "model": "deepseek-chat",
-    "timeout": 60,
-    "max_tokens": 3072,
-}
-_llm_config: dict[str, Any] = {}
+def _llm_base_url() -> str:
+    return os.getenv("LLM_D_BASE_URL", "https://api.deepseek.com").rstrip("/")
+
+
+def _llm_api_key() -> str:
+    return os.getenv("LLM_D_API_KEY", "")
+
+
+def _llm_model() -> str:
+    return os.getenv("LLM_D_MODEL", "deepseek-chat")
+
+
+def _llm_timeout() -> int:
+    return int(os.getenv("LLM_D_TIMEOUT", "60"))
+
+
+def _llm_max_tokens() -> int:
+    return int(os.getenv("LLM_D_MAX_TOKENS", "3072"))
+
+
 _client: openai.OpenAI | None = None
+_client_signature: tuple[str, str] | None = None
 
-# Current semester cutoff: ignore content from before 2025-09-01 (上学期 + 上上学期)
-SEMESTER_CUTOFF = "2025-09-01"
-
-
-def _load_llm_config() -> dict[str, Any]:
-    """Load LLM config from file, falling back to env vars and defaults."""
-    cfg: dict[str, Any] = {}
-    if _LLM_CONFIG_FILE.exists():
-        try:
-            saved = json.loads(_LLM_CONFIG_FILE.read_text(encoding="utf-8"))
-            if isinstance(saved, dict):
-                cfg.update(saved)
-        except (json.JSONDecodeError, OSError):
-            pass
-    cfg.setdefault("base_url", os.getenv("LLM_D_BASE_URL", _LLM_CONFIG_DEFAULTS["base_url"]).rstrip("/"))
-    cfg.setdefault("api_key", os.getenv("LLM_D_API_KEY", _LLM_CONFIG_DEFAULTS["api_key"]))
-    cfg.setdefault("model", os.getenv("LLM_D_MODEL", _LLM_CONFIG_DEFAULTS["model"]))
-    cfg.setdefault("timeout", int(os.getenv("LLM_D_TIMEOUT", str(_LLM_CONFIG_DEFAULTS["timeout"]))))
-    cfg.setdefault("max_tokens", int(os.getenv("LLM_D_MAX_TOKENS", str(_LLM_CONFIG_DEFAULTS["max_tokens"]))))
-    return cfg
-
-
-def _save_llm_config(cfg: dict[str, Any]) -> None:
-    _LLM_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _LLM_CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def get_llm_config() -> dict[str, Any]:
-    """Return current LLM config (API key masked)."""
-    cfg = dict(_llm_config)
-    key = cfg.get("api_key", "")
-    if key:
-        cfg["api_key"] = key[:4] + "****" + key[-4:] if len(key) > 8 else "****"
-    return cfg
-
-
-def update_llm_config(updates: dict[str, Any]) -> dict[str, Any]:
-    """Update LLM config at runtime, persist to file, recreate client."""
-    global _client, _llm_config
-    allowed = {"base_url", "api_key", "model", "timeout", "max_tokens"}
-    for key in updates:
-        if key in allowed and updates[key]:
-            _llm_config[key] = updates[key] if key == "api_key" else updates[key]
-    if "base_url" in updates and updates["base_url"]:
-        _llm_config["base_url"] = str(updates["base_url"]).rstrip("/")
-    if "timeout" in updates:
-        try:
-            _llm_config["timeout"] = int(updates["timeout"])
-        except (ValueError, TypeError):
-            pass
-    if "max_tokens" in updates:
-        try:
-            _llm_config["max_tokens"] = int(updates["max_tokens"])
-        except (ValueError, TypeError):
-            pass
-    _save_llm_config(_llm_config)
-    _client = None  # force recreate
-    return get_llm_config()
-
-
-# Load at import time
-_llm_config = _load_llm_config()
-
+SEMESTER_CUTOFF = settings.semester_start
 
 def _get_client() -> openai.OpenAI:
-    global _client
-    if _client is None:
+    global _client, _client_signature
+    base_url = _llm_base_url()
+    api_key = _llm_api_key()
+    signature = (base_url, api_key)
+    if _client is None or _client_signature != signature:
         _client = openai.OpenAI(
-            api_key=_llm_config["api_key"],
-            base_url=f"{_llm_config['base_url']}/v1/",
-            timeout=_llm_config["timeout"],
+            api_key=api_key,
+            base_url=f"{base_url}/v1/",
+            timeout=_llm_timeout(),
         )
+        _client_signature = signature
     return _client
 
 # ---------------------------------------------------------------------------
@@ -161,16 +110,15 @@ QA_SYSTEM = """\
 {"answer": "结构化的详细回答", "citations": [{"title": "来源标题", "source": "数据来源类型与路径", "snippet": "引用片段"}]}"""
 
 SUMMARY_SYSTEM = """\
-你是一个专业的课程学习助手。根据用户指定的资料生成结构化总结或回答针对资料的问题。
+你是一个专业的课程学习助手。根据多来源资料生成结构化总结。
 
-## 回答要求
-1. 用户要求总结时，提炼资料中最核心的课程要点；用户提出具体问题时，直接根据资料回答。
+## 总结要求
+1. 综合课件知识、作业练习、邮件通知等内容，提炼最核心的课程要点。
 2. 按知识体系组织，标注 4-7 个关键要点。
 3. 每个重要概念标明出处。
-4. 指定文件时只能使用该文件的内容，不要混入其他资料。
 
 请严格返回 JSON：
-{"summary": "详细总结", "key_points": ["要点1", ...], "citations": [{"title": "来源标题", "source": "数据来源类型与路径", "snippet": "引用片段"}]}"""
+{"summary": "详细总结", "key_points": ["要点1", ...], "citations": [...]}"""
 
 HOMEWORK_SYSTEM = """\
 你是一个课程作业辅导助手。
@@ -201,74 +149,90 @@ def _extract_json(text: str) -> dict[str, Any]:
     return json.loads(text)
 
 
-# ---------------------------------------------------------------------------
-# LLM response cache
-# ---------------------------------------------------------------------------
+def _classify_llm_error(exc: Exception) -> dict[str, Any]:
+    message = str(exc).lower()
+    if not _llm_api_key().strip():
+        return {
+            "error_code": "missing_api_key",
+            "user_message": "未配置 LLM API Key，请在设置页保存 LLM_D_API_KEY。",
+            "retryable": False,
+        }
+    if "401" in message or "403" in message or "invalid" in message and "key" in message:
+        return {
+            "error_code": "invalid_api_key",
+            "user_message": "API Key 无效或已过期，请检查设置页配置。",
+            "retryable": False,
+        }
+    if "429" in message or "rate" in message or "limit" in message:
+        return {
+            "error_code": "rate_limited",
+            "user_message": "LLM 请求被限流，请稍后重试。",
+            "retryable": True,
+        }
+    if "timeout" in message or "timed out" in message:
+        return {
+            "error_code": "timeout",
+            "user_message": "LLM 请求超时，请缩短问题或稍后重试。",
+            "retryable": True,
+        }
+    if "balance" in message or "quota" in message or "insufficient" in message or "余额" in message:
+        return {
+            "error_code": "insufficient_balance",
+            "user_message": "API 余额不足，请更换 Key 或充值后重试。",
+            "retryable": False,
+        }
+    if "model" in message and ("not found" in message or "does not exist" in message):
+        return {
+            "error_code": "model_not_found",
+            "user_message": "模型不存在，请检查 LLM_D_MODEL 配置。",
+            "retryable": False,
+        }
+    if "500" in message or "502" in message or "503" in message:
+        return {
+            "error_code": "upstream_error",
+            "user_message": "LLM 服务暂时不可用，请稍后重试。",
+            "retryable": True,
+        }
+    return {
+        "error_code": "llm_error",
+        "user_message": "LLM 调用失败，请检查网络与 API 配置。",
+        "retryable": True,
+    }
 
-_LLM_CACHE_DIR = Path(__file__).resolve().parents[3] / "storage" / "llm_cache"
-_LLM_CACHE_TTL = int(os.getenv("LLM_D_CACHE_TTL", "86400"))  # 24 hours
+
+def _blocked_payload(exc: Exception, *, retrieved: dict[str, Any] | None = None, **extra: Any) -> dict[str, Any]:
+    error = _classify_llm_error(exc)
+    payload: dict[str, Any] = {
+        "source_module": "D",
+        "status": "blocked",
+        "error_code": error["error_code"],
+        "user_message": error["user_message"],
+        "retryable": error["retryable"],
+        "errors": [{**error, "detail": str(exc)}],
+        "warnings": [],
+    }
+    if retrieved is not None:
+        payload["retrieved"] = retrieved
+    payload.update(extra)
+    return payload
 
 
-def _cache_key(model: str, temperature: float, messages: list[dict[str, str]]) -> str:
-    payload = json.dumps(
-        {"model": model, "temperature": temperature, "messages": messages},
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _cache_get(key: str) -> dict[str, Any] | None:
-    cache_file = _LLM_CACHE_DIR / f"{key}.json"
-    if not cache_file.exists():
-        return None
-    try:
-        data = json.loads(cache_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    created = data.get("_created", 0)
-    if time.time() - created > _LLM_CACHE_TTL:
-        return None
-    return data.get("response")
-
-
-def _cache_set(key: str, response: dict[str, Any]) -> None:
-    _LLM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_file = _LLM_CACHE_DIR / f"{key}.json"
-    cache_file.write_text(
-        json.dumps(
-            {"_key": key, "_created": time.time(), "response": response},
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-
-def _llm_chat(
-    messages: list[dict[str, str]],
-    temperature: float = 0.5,
-    *,
-    use_cache: bool = True,
-) -> dict[str, Any]:
-    key = _cache_key(_llm_config["model"], temperature, messages)
-    if use_cache:
-        cached = _cache_get(key)
-        if cached is not None:
-            return cached
-
+def _llm_chat(messages: list[dict[str, str]], temperature: float = 0.5) -> dict[str, Any]:
+    if not _llm_api_key().strip():
+        raise RuntimeError("LLM_D_API_KEY is not configured")
     client = _get_client()
     response = client.chat.completions.create(
-        model=_llm_config["model"],
+        model=_llm_model(),
         messages=messages,
         temperature=temperature,
-        max_tokens=_llm_config["max_tokens"],
+        max_tokens=_llm_max_tokens(),
         response_format={"type": "json_object"},
     )
-    result = _extract_json(response.choices[0].message.content or "")
-
-    if use_cache:
-        _cache_set(key, result)
-    return result
+    raw = response.choices[0].message.content or ""
+    try:
+        return _extract_json(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"模型返回格式异常：{exc}") from exc
 
 # ---------------------------------------------------------------------------
 # A-module data loaders (D 调用 A 模块)
@@ -279,11 +243,7 @@ _TASK_CACHE_TIME: datetime | None = None
 
 
 def _load_all_records() -> list[dict[str, Any]]:
-    """Load all A-module records (learn + mail + jwch).  [D → A]
-
-    Schedule records (jwch.jsonl) are filtered to only include courses
-    that appear in learn.jsonl, since jwch currently contains all-school data.
-    """
+    """Load all A-module records (learn + mail + jwch).  [D → A]"""
     global _TASK_CACHE, _TASK_CACHE_TIME
     now = datetime.now(timezone.utc)
     if _TASK_CACHE is not None and _TASK_CACHE_TIME is not None:
@@ -291,10 +251,9 @@ def _load_all_records() -> list[dict[str, Any]]:
             return _TASK_CACHE
 
     records: list[dict[str, Any]] = []
-    user_courses: set[str] = set()
-
-    # Phase 1: load learn + mail → discover user's enrolled courses
-    for path in [settings.learn_jsonl, settings.mail_jsonl]:
+    paths = [settings.collector_jsonl, settings.learn_jsonl, settings.mail_jsonl, settings.jwch_jsonl]
+    seen_ids: set[str] = set()
+    for path in paths:
         if not path.exists():
             continue
         try:
@@ -307,37 +266,21 @@ def _load_all_records() -> list[dict[str, Any]]:
                         rec = json.loads(line)
                         if not isinstance(rec, dict):
                             continue
+                        dedupe_key = str(rec.get("raw_id") or rec.get("id") or f"{path}:{line[:80]}")
+                        if dedupe_key in seen_ids:
+                            continue
+                        seen_ids.add(dedupe_key)
+                        if "schedule_type" in rec:
+                            rec["_source"] = "schedules"
+                        elif path.name == "mail.jsonl" or rec.get("source") == "mail":
+                            rec["_source"] = "emails"
+                        else:
+                            rec["_source"] = "tasks"
+                        records.append(rec)
                     except json.JSONDecodeError:
                         continue
-                    source = "emails" if path.name == "mail.jsonl" else "tasks"
-                    rec["_source"] = source
-                    records.append(rec)
-                    course = str(rec.get("course_name") or "").strip()
-                    if course and course != "Unknown Course":
-                        user_courses.add(course)
         except OSError:
             continue
-
-    # Phase 2: load schedules → only keep matching courses
-    if settings.jwch_jsonl.exists():
-        try:
-            with settings.jwch_jsonl.open("r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                        if not isinstance(rec, dict):
-                            continue
-                    except json.JSONDecodeError:
-                        continue
-                    course = str(rec.get("course_name") or "").strip()
-                    if course in user_courses:
-                        rec["_source"] = "schedules"
-                        records.append(rec)
-        except OSError:
-            pass
 
     _TASK_CACHE = records
     _TASK_CACHE_TIME = now
@@ -375,10 +318,7 @@ def _search_a_module(
         content = (rec.get("content") or "").lower()
         course = (rec.get("course_name") or "").lower()
         score = 0
-        for term in set(jieba.cut(query_lower)):
-            term = term.strip()
-            if not term or len(term) < 2:
-                continue
+        for term in query_lower.split():
             if term in title:
                 score += 3
             if term in content:
@@ -386,13 +326,13 @@ def _search_a_module(
             if term in course:
                 score += 2
 
-        # Boost homework-type records when query mentions 作业/提交/截止
-        if rec.get("task_type") == "homework":
-            score += 5
-
-        # Boost if course_hint matches
+        # Boost if course_hint matches; explicit course selection should still surface records.
         if course_hint and course_hint.lower() in course:
             score += 5
+            if rec.get("task_type") == "homework" and any(
+                token in f"{query_lower} {title}" for token in ("作业", "homework", "ddl", "截止", "提交")
+            ):
+                score += 3
 
         if score > 0:
             results.append({**rec, "_score": score})
@@ -416,7 +356,7 @@ def _search_c_module(
     results: list[dict[str, Any]] = []
     for q in queries:
         try:
-            hits = kb.search(query=q, course_name=course_hint, top_k=top_k, mode="hybrid")
+            hits = kb.search(query=q, course_name=course_hint, top_k=top_k, mode="keyword")
         except Exception:
             continue
         for h in hits:
@@ -467,113 +407,36 @@ def _merge_citations(a_records: list[dict], c_chunks: list[dict]) -> list[dict]:
     for i, r in enumerate(a_records[:5]):
         citations.append({
             "title": r.get("title", "无标题"),
-            "source": f"任务与通知-{r.get('_source', 'unknown')}",
+            "source": f"A模块-{r.get('_source', 'unknown')}",
             "snippet": (r.get("content") or "")[:200],
         })
     for i, c in enumerate(c_chunks[:5]):
         citations.append({
             "title": c.get("title", "无标题"),
-            "source": c.get("citation", "课程资料"),
+            "source": c.get("citation", "C模块"),
             "snippet": c.get("text", "")[:200],
         })
     return citations
 
 
-def _load_material_chunks(material_id: str, query: str) -> list[dict[str, Any]]:
-    """Load and rank chunks belonging to one exact material file."""
-
-    if not settings.material_chunks_jsonl.exists():
-        return []
-    records: list[dict[str, Any]] = []
-    with settings.material_chunks_jsonl.open("r", encoding="utf-8") as stream:
-        for line in stream:
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(item, dict):
-                continue
-            if material_id not in {
-                str(item.get("file_hash") or ""),
-                str(item.get("source_file") or ""),
-            }:
-                continue
-            enriched = dict(item)
-            enriched["citation"] = str(item.get("source_file") or item.get("title") or "课程资料")
-            enriched["_source_type"] = "指定文件"
-            records.append(enriched)
-    return _select_material_chunks(records, query)
-
-
-def _select_material_chunks(
-    records: list[dict[str, Any]],
-    query: str,
-    *,
-    max_chunks: int = 20,
-    max_chars: int = 24000,
-) -> list[dict[str, Any]]:
-    """Select relevant chunks while keeping broad summaries representative."""
-
-    if not records:
-        return []
-    ordered = sorted(records, key=lambda item: int(item.get("chunk_index") or 0))
-    terms = _query_terms(query)
-    generic_terms = {"总结", "概括", "梳理", "主要内容", "核心内容", "知识点"}
-    scored: list[tuple[int, dict[str, Any]]] = []
-    for item in ordered:
-        text = str(item.get("text") or "").lower()
-        score = sum(text.count(term) for term in terms if term not in generic_terms)
-        scored.append((score, item))
-
-    if any(score > 0 for score, _ in scored):
-        selected = [
-            item
-            for _, item in sorted(
-                scored,
-                key=lambda pair: (-pair[0], int(pair[1].get("chunk_index") or 0)),
-            )[:max_chunks]
-        ]
-        selected.sort(key=lambda item: int(item.get("chunk_index") or 0))
-    elif len(ordered) <= max_chunks:
-        selected = ordered
-    else:
-        indexes = {
-            round(index * (len(ordered) - 1) / (max_chunks - 1))
-            for index in range(max_chunks)
-        }
-        selected = [ordered[index] for index in sorted(indexes)]
-
-    limited: list[dict[str, Any]] = []
-    used_chars = 0
-    for item in selected:
-        text = str(item.get("text") or "")
-        if not text:
-            continue
-        remaining = max_chars - used_chars
-        if remaining <= 0:
-            break
-        copy = dict(item)
-        copy["text"] = text[:remaining]
-        limited.append(copy)
-        used_chars += len(copy["text"])
-    return limited
-
-
-def _query_terms(query: str) -> set[str]:
-    lowered = query.lower()
-    terms = {
-        match
-        for match in re.findall(r"[a-z0-9_+-]{2,}|[\u4e00-\u9fff]{2,}", lowered)
-        if match
-    }
-    for chinese in re.findall(r"[\u4e00-\u9fff]{3,}", lowered):
-        terms.update(chinese[index : index + 2] for index in range(len(chinese) - 1))
-    return terms
-
-
 # ---------------------------------------------------------------------------
 # Stage 1: Query planning (D → LLM)
 # ---------------------------------------------------------------------------
+
+def _fallback_plan(question: str, course_name: str | None) -> dict[str, Any]:
+    """Rule-based search plan when LLM planning is unavailable."""
+    sources = ["tasks", "emails", "schedules", "knowledge_base"]
+    haystack = f"{question} {course_name or ''}"
+    if any(token in haystack for token in ("考试", "课表", "期中", "期末")):
+        sources = ["schedules", "tasks", "emails", "knowledge_base"]
+    elif any(token in haystack for token in ("概念", "原理", "知识点", "怎么", "如何")):
+        sources = ["knowledge_base", "tasks"]
+    return {
+        "queries": [question, course_name or question],
+        "sources": sources,
+        "course_hint": course_name,
+    }
+
 
 def _plan_query(question: str, course_name: str | None) -> dict[str, Any]:
     """Stage 1: LLM analyzes question → search plan."""
@@ -585,7 +448,10 @@ def _plan_query(question: str, course_name: str | None) -> dict[str, Any]:
         {"role": "system", "content": planning_prompt},
         {"role": "user", "content": f"课程: {course_name or '未指定'}\n问题: {question}"},
     ]
-    return _llm_chat(messages, temperature=0.2, use_cache=False)
+    try:
+        return _llm_chat(messages, temperature=0.2)
+    except Exception:
+        return _fallback_plan(question, course_name)
 
 
 # ---------------------------------------------------------------------------
@@ -616,33 +482,49 @@ class ModuleDAdapter:
             self._ready = self._kb.is_built()
         return self._kb
 
-    def status(self) -> str:
+    def status(self) -> dict[str, Any]:
+        has_key = bool(_llm_api_key().strip())
+        task_count = len(_load_all_records())
         self._get_kb()
-        return "ready" if self._ready else "missing"
+        kb_ready = self._ready
+        if not has_key:
+            return {
+                "status": "missing",
+                "llm_configured": False,
+                "knowledge_ready": kb_ready,
+                "task_records": task_count,
+                "message": "未配置 LLM_D_API_KEY",
+                "source_module": "D",
+            }
+        return {
+            "status": "ready" if kb_ready or task_count > 0 else "missing",
+            "llm_configured": True,
+            "knowledge_ready": kb_ready,
+            "task_records": task_count,
+            "model": _llm_model(),
+            "message": "LLM 已配置" if kb_ready else "LLM 已配置，但知识库未建立",
+            "source_module": "D",
+        }
+
+    def status_badge(self) -> str:
+        return str(self.status().get("status", "missing"))
 
     # ---- Stage 1+2: Plan + Multi-source Search ---------------------------
 
-    def _search(self, question: str, course_name: str | None) -> dict[str, Any]:
-        """Execute plan → A+C search → return combined context.  [D → LLM → A + C]"""
+    def _execute_search(self, plan: dict[str, Any], *, question: str, course_name: str | None) -> dict[str, Any]:
         kb = self._get_kb()
-
-        # Stage 1: Plan  [D → LLM]
-        plan = _plan_query(question, course_name)
         queries = plan.get("queries", [question])
         sources = plan.get("sources", ["knowledge_base", "tasks", "emails", "schedules"])
         course_hint = plan.get("course_hint") or course_name
 
-        # Stage 2: Search
         a_results: list[dict] = []
         c_results: list[dict] = []
 
-        # A-module sources
         a_sources = [s for s in sources if s in ("tasks", "emails", "schedules")]
         if a_sources:
-            combined_query = " ".join(q for q in queries if q.strip())
+            combined_query = " ".join(str(q) for q in queries if q)
             a_results = _search_a_module(combined_query, a_sources, course_hint)
 
-        # C-module source  [D → C]
         if "knowledge_base" in sources:
             c_results = _search_c_module(kb, queries, course_hint)
 
@@ -654,13 +536,22 @@ class ModuleDAdapter:
             "c_results": c_results,
         }
 
+    def _search(self, question: str, course_name: str | None) -> dict[str, Any]:
+        """Execute plan → A+C search → return combined context.  [D → LLM → A + C]"""
+        plan = _plan_query(question, course_name)
+        return self._execute_search(plan, question=question, course_name=course_name)
+
     # ---- QA  [D → LLM plan → A + C search → LLM answer] ------------------
 
     def qa(self, request: QARequest) -> dict[str, Any]:
         try:
             ctx = self._search(request.question, request.course_name)
         except Exception:
-            ctx = {"a_results": [], "c_results": [], "queries": [], "sources": []}
+            ctx = self._execute_search(
+                _fallback_plan(request.question, request.course_name),
+                question=request.question,
+                course_name=request.course_name,
+            )
 
         a_ctx = _format_a_results(ctx["a_results"])
         c_ctx = _format_c_results(ctx["c_results"])
@@ -693,52 +584,28 @@ class ModuleDAdapter:
                 "status": "ready",
             }
         except Exception as exc:
-            return {
-                "answer": f"LLM 调用失败：{exc}",
-                "citations": [],
-                "retrieved": {"a_module": len(ctx["a_results"]), "c_module": len(ctx["c_results"])},
-                "source_module": "D",
-                "status": "blocked",
-            }
+            return _blocked_payload(
+                exc,
+                answer=f"无法生成回答：{_classify_llm_error(exc)['user_message']}",
+                citations=[],
+                retrieved={
+                    "a_module": len(ctx["a_results"]),
+                    "c_module": len(ctx["c_results"]),
+                    "queries_used": ctx.get("queries", []),
+                    "sources_used": ctx.get("sources", []),
+                },
+            )
 
     # ---- Summaries  [D → LLM plan → A + C search → LLM summary] -----------
 
     def summarize(self, request: SummaryRequest) -> dict[str, Any]:
         topic = request.topic or request.course_name or "课程内容总结"
-        question = topic if request.material_id else f"总结：{topic}"
+        question = f"总结：{topic}"
 
-        if request.material_id:
-            c_results = _load_material_chunks(request.material_id, question)
-            # Filter by page/slide if requested
-            if request.page is not None:
-                c_results = [c for c in c_results if c.get("page") == request.page]
-            if request.slide is not None:
-                c_results = [c for c in c_results if c.get("slide") == request.slide]
-            if not c_results:
-                scope = f"第{request.page}页" if request.page else f"第{request.slide}张幻灯片" if request.slide else "所选文件"
-                return {
-                    "summary": f"未找到{scope}的可用解析内容。",
-                    "key_points": [],
-                    "citations": [],
-                    "retrieved": {
-                        "a_module": 0,
-                        "c_module": 0,
-                        "material_id": request.material_id,
-                    },
-                    "source_module": "D",
-                    "status": "blocked",
-                }
-            ctx = {
-                "a_results": [],
-                "c_results": c_results,
-                "queries": [question],
-                "sources": ["selected_material"],
-            }
-        else:
-            try:
-                ctx = self._search(question, request.course_name)
-            except Exception:
-                ctx = {"a_results": [], "c_results": [], "queries": [], "sources": []}
+        try:
+            ctx = self._search(question, request.course_name)
+        except Exception:
+            ctx = {"a_results": [], "c_results": [], "queries": [], "sources": []}
 
         c_ctx = _format_c_results(ctx["c_results"])
         a_ctx = _format_a_results(ctx["a_results"])
@@ -749,25 +616,10 @@ class ModuleDAdapter:
             context_blocks.append(f"【相关任务与通知】\n{a_ctx}")
         combined = "\n\n========\n\n".join(context_blocks) or "暂无相关资料。"
 
-        scope = request.topic or request.course_name or "当前课程"
-        if request.material_id and request.page:
-            material_instruction = f"仅使用上方指定文件第 {request.page} 页的内容回答。"
-        elif request.material_id and request.slide:
-            material_instruction = f"仅使用上方指定文件第 {request.slide} 张幻灯片的内容回答。"
-        elif request.material_id:
-            material_instruction = "仅使用上方指定文件回答。"
-        else:
-            material_instruction = "综合使用上方多源资料回答。"
+        scope = request.topic or request.course_name or request.material_id or "当前课程"
         messages = [
             {"role": "system", "content": SUMMARY_SYSTEM},
-            {
-                "role": "user",
-                "content": (
-                    f"【参考资料】\n{combined}\n\n"
-                    f"【用户要求或问题】\n{scope}\n\n"
-                    f"【范围约束】\n{material_instruction}"
-                ),
-            },
+            {"role": "user", "content": f"【多源参考资料】\n{combined}\n\n【总结主题】\n{scope}"},
         ]
 
         try:
@@ -780,19 +632,21 @@ class ModuleDAdapter:
                 "retrieved": {
                     "a_module": len(ctx["a_results"]),
                     "c_module": len(ctx["c_results"]),
-                    "material_id": request.material_id,
                 },
                 "source_module": "D",
                 "status": "ready",
             }
         except Exception as exc:
-            return {
-                "summary": f"LLM 调用失败：{exc}",
-                "key_points": [],
-                "citations": [],
-                "source_module": "D",
-                "status": "blocked",
-            }
+            return _blocked_payload(
+                exc,
+                summary=f"无法生成总结：{_classify_llm_error(exc)['user_message']}",
+                key_points=[],
+                citations=[],
+                retrieved={
+                    "a_module": len(ctx["a_results"]),
+                    "c_module": len(ctx["c_results"]),
+                },
+            )
 
     # ---- Homework Assistant  [D → A (task lookup) → LLM plan → A+C search → LLM] -
 
@@ -824,18 +678,8 @@ class ModuleDAdapter:
             context_blocks.append(f"【相关任务】\n{a_ctx}")
         combined = "\n\n========\n\n".join(context_blocks) or "暂无相关资料。"
 
-        upload_context = ""
-        if request.upload_texts:
-            upload_blocks = []
-            for i, text in enumerate(request.upload_texts):
-                if text.strip():
-                    upload_blocks.append(f"[上传文件 {i + 1}]\n{text.strip()}")
-            if upload_blocks:
-                upload_context = "【学生上传的补充材料】\n" + "\n\n".join(upload_blocks) + "\n\n"
-
         user_msg = (
             f"【作业信息 — A 模块】\n标题：{task_title}\n要求：{task_content or '（无详细描述）'}\n\n"
-            f"{upload_context}"
             f"【多源参考资料】\n{combined}\n\n"
             f"【学生问题】\n{request.question}"
         )
@@ -862,11 +706,14 @@ class ModuleDAdapter:
                 "status": "ready",
             }
         except Exception as exc:
-            return {
-                "task_id": request.task_id,
-                "outline": [],
-                "draft": f"LLM 调用失败：{exc}",
-                "citations": [],
-                "source_module": "D",
-                "status": "blocked",
-            }
+            return _blocked_payload(
+                exc,
+                task_id=request.task_id,
+                outline=[],
+                draft=f"无法生成作业建议：{_classify_llm_error(exc)['user_message']}",
+                citations=[],
+                retrieved={
+                    "a_module": len(ctx["a_results"]),
+                    "c_module": len(ctx["c_results"]),
+                },
+            )

@@ -142,6 +142,12 @@ h2 {
   box-shadow: 0 8px 18px rgba(49, 94, 219, 0.2);
 }
 
+.secondary-action {
+  color: #315edb;
+  background: #eef3ff;
+  box-shadow: none;
+}
+
 .sync-button:disabled,
 .primary:disabled {
   opacity: 0.6;
@@ -768,6 +774,80 @@ textarea:focus {
   color: #66758b;
   background: #f2f5f9;
   font-size: 13px;
+}
+
+.nested-settings-panel {
+  margin-top: 16px;
+}
+
+.credential-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.credential-section {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e7ecf3;
+  border-radius: 12px;
+  background: #fbfcfe;
+}
+
+.credential-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.credential-section-title h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.config-status {
+  flex-shrink: 0;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.config-status.ready {
+  color: #17613c;
+  background: #dcf5e7;
+}
+
+.config-status.missing {
+  color: #8a5a00;
+  background: #fff3cd;
+}
+
+.compact-row {
+  margin: 0;
+}
+
+.settings-actions {
+  display: flex;
+  margin-top: 16px;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.save-success,
+.rebuild-result {
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: #2e7d32;
+  background: #e8f5e9;
+  font-size: 13px;
+}
+
+.rebuild-result {
+  margin-top: 12px;
 }
 
 /* ---- Workspace layout (main + sidebar) ---- */

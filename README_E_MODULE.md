@@ -26,8 +26,40 @@ http://127.0.0.1:8000/docs
 
 ```powershell
 python scripts\verify_e_module.py
+python scripts\verify_e2e.py
 python scripts\verify_knowledge.py
+python scripts\run_harness.py
 ```
+
+## 两种运行模式
+
+### Demo 模式（无需真实账号）
+
+前端默认开启“演示模式”，使用 `storage/demo_*.jsonl` 回退数据，隐藏旧学期和低优先级资料。
+
+```powershell
+python scripts\dev_start.ps1
+```
+
+### 真实账号模式
+
+1. 在设置页保存学堂/邮箱/LLM 配置，或运行 `POST /api/settings/bootstrap` 从本地 txt 导入。
+2. 一键流水线：
+
+```powershell
+.\scripts\full_pipeline.ps1 -StartServer
+```
+
+或分步：
+
+```powershell
+python main.py --channel all --allow-network --output storage/collector.jsonl
+python scripts\export_attachments.py --source learn --jsonl storage/collector.jsonl
+python scripts\parse_materials.py --incremental --records-jsonl storage/collector.jsonl
+python -c "from backend.app.adapters.module_c import ModuleCAdapter; ModuleCAdapter().rebuild(force=True)"
+```
+
+D 模块为**真实 LLM**，需配置 `LLM_D_API_KEY`。无 Key / 无余额时仅阻塞问答/总结/作业页，不影响 Dashboard、任务中心、资料页。
 
 ## 前端
 

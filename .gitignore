@@ -13,7 +13,6 @@ storage/*.sqlite3
 storage/*.jsonl
 !storage/demo_*.jsonl
 storage/attachments/
-storage/task_attachments/
 storage/*session*.json
 storage/*trust*.json
 storage/*cookie*.json
@@ -26,11 +25,14 @@ frontend/dist/
 # C module knowledge base index
 storage/knowledge_index/
 
-# D module LLM response cache
-storage/llm_cache/
-
-# User uploaded files
-storage/uploads/
-
-# LLM runtime config (written by settings UI)
-storage/llm_config.json
+# Local credential files — never commit
+*账号*密码*.txt
+*api*key*.txt
+ds-for-cursor.txt
+网络学堂账号和密码.txt
+storage/material_parse_report.json
+storage/*session*.json
+storage/*trust*.json
+storage/*cookie*.json
+storage/*cookies*.json
+config/.env

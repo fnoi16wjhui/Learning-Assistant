@@ -4,6 +4,17 @@ import { apiGet, apiPost, apiUrl } from "./api";
 type AnyRecord = Record<string, any>;
 type TaskView = "pending" | "homework" | "all";
 
+type LocalSettingsForm = {
+  learn_username: string;
+  learn_password: string;
+  mail_username: string;
+  mail_password: string;
+  llm_base_url: string;
+  llm_api_key: string;
+  llm_model: string;
+  llm_timeout: number;
+};
+
 type Preferences = {
   semesterId: string;
   recentLimit: number;
@@ -29,6 +40,17 @@ const defaultPreferences: Preferences = {
   semesterId: "2025-2026-2",
   recentLimit: 4,
   taskView: "pending",
+};
+
+const defaultLocalSettingsForm: LocalSettingsForm = {
+  learn_username: "",
+  learn_password: "",
+  mail_username: "",
+  mail_password: "",
+  llm_base_url: "https://api.deepseek.com",
+  llm_api_key: "",
+  llm_model: "deepseek-chat",
+  llm_timeout: 60,
 };
 
 export function App() {
@@ -65,9 +87,11 @@ export function App() {
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildResult, setRebuildResult] = useState<string | null>(null);
 
-  const [llmConfig, setLlmConfig] = useState<AnyRecord | null>(null);
-  const [llmConfigLoading, setLlmConfigLoading] = useState(false);
-  const [llmConfigSaved, setLlmConfigSaved] = useState(false);
+  const [settingsStatus, setSettingsStatus] = useState<AnyRecord | null>(null);
+  const [localSettings, setLocalSettings] = useState<LocalSettingsForm>(defaultLocalSettingsForm);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
 
   async function refreshData() {
     const [dashboardData, taskData, materialData] = await Promise.all([
@@ -105,7 +129,7 @@ export function App() {
   }, [qaLoading, summaryLoading, homeworkLoading]);
 
   useEffect(() => {
-    if (active === "settings") loadLlmConfig();
+    if (active === "settings") loadLocalSettings();
   }, [active]);
 
   const semester = useMemo(
@@ -175,7 +199,7 @@ export function App() {
     }
   }, [selectedTaskId, taskPool]);
 
-  const upcomingCount = homeworkTasks.filter((task) => isFutureDeadline(task.ddl)).length;
+  const upcomingCount = pendingHomework.filter((task) => deadlineTone(task.ddl) === "soon").length;
   const courseCount = new Set(
     semesterTasks.map((task) => task.course_name).filter((name) => name && name !== "Unknown Course"),
   ).size;
@@ -300,35 +324,58 @@ export function App() {
     }
   }
 
-  async function loadLlmConfig() {
-    setLlmConfigLoading(true);
+  async function loadLocalSettings() {
+    setSettingsLoading(true);
     try {
-      const data = await apiGet<AnyRecord>("/api/settings/llm");
-      setLlmConfig(data.config ?? null);
+      const data = await apiGet<AnyRecord>("/api/settings/status");
+      setSettingsStatus(data);
+      const fields = data.fields ?? {};
+      setLocalSettings((current) => ({
+        ...current,
+        learn_username: settingsFieldValue(fields, "LEARN_USERNAME", ""),
+        learn_password: "",
+        mail_username: settingsFieldValue(fields, "MAIL_USERNAME", ""),
+        mail_password: "",
+        llm_base_url: settingsFieldValue(fields, "LLM_D_BASE_URL", "https://api.deepseek.com"),
+        llm_api_key: "",
+        llm_model: settingsFieldValue(fields, "LLM_D_MODEL", "deepseek-chat"),
+        llm_timeout: Number(settingsFieldValue(fields, "LLM_D_TIMEOUT", "60")) || 60,
+      }));
     } catch {
       // ignore
     } finally {
-      setLlmConfigLoading(false);
+      setSettingsLoading(false);
     }
   }
 
-  async function saveLlmConfig() {
-    if (!llmConfig) return;
-    setLlmConfigSaved(false);
+  async function saveLocalSettings() {
+    setSettingsSaved(false);
+    setSettingsSaving(true);
     setError(null);
     try {
-      const data = await apiPost<AnyRecord>("/api/settings/llm", {
-        base_url: llmConfig.base_url,
-        api_key: llmConfig.api_key,
-        model: llmConfig.model,
-        timeout: llmConfig.timeout,
-        max_tokens: llmConfig.max_tokens,
+      const data = await apiPost<AnyRecord>("/api/settings/local", {
+        learn_username: localSettings.learn_username,
+        learn_password: localSettings.learn_password,
+        mail_username: localSettings.mail_username,
+        mail_password: localSettings.mail_password,
+        llm_base_url: localSettings.llm_base_url,
+        llm_api_key: localSettings.llm_api_key,
+        llm_model: localSettings.llm_model,
+        llm_timeout: localSettings.llm_timeout,
       });
-      setLlmConfig(data.config ?? null);
-      setLlmConfigSaved(true);
-      setTimeout(() => setLlmConfigSaved(false), 3000);
+      setSettingsStatus((current) => ({ ...(current ?? {}), fields: data.fields ?? current?.fields }));
+      setLocalSettings((current) => ({
+        ...current,
+        learn_password: "",
+        mail_password: "",
+        llm_api_key: "",
+      }));
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 3000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "LLM 配置保存失败");
+      setError(err instanceof Error ? err.message : "账号与接口设置保存失败");
+    } finally {
+      setSettingsSaving(false);
     }
   }
 
@@ -363,6 +410,9 @@ export function App() {
               <button className="sync-button" onClick={syncLatest} disabled={syncing}>
                 {syncing ? "同步中..." : "同步到最新"}
               </button>
+              <button className="sync-button secondary-action" onClick={rebuildKnowledge} disabled={rebuilding}>
+                {rebuilding ? "重建中..." : "重新构建知识库索引"}
+              </button>
             </div>
           )}
         </header>
@@ -377,7 +427,7 @@ export function App() {
           <section className="dashboard">
             <div className="stats-row">
               <StatCard title="待完成作业" value={pendingHomework.length} hint="需要继续处理" />
-              <StatCard title="临近截止" value={upcomingCount} hint="本学期有明确截止时间" />
+              <StatCard title="临近截止" value={upcomingCount} hint="待完成且 3 天内到期" />
               <StatCard title="当前课程" value={courseCount || dashboard?.stats?.course_count || 0} hint="已识别课程" />
               <StatCard title="本学期作业" value={homeworkTasks.length} hint="包含已提交和待完成" />
             </div>
@@ -663,81 +713,113 @@ export function App() {
               </label>
             </div>
             <div className="settings-note">偏好已自动保存在当前浏览器。时间统一按北京时间显示。</div>
-            <Panel title="知识库管理" className="settings-panel">
-              <p className="muted intro">解析新课件或同步新附件后，需要重建知识库索引才能被问答检索到。</p>
-              <button
-                className="primary"
-                onClick={rebuildKnowledge}
-                disabled={rebuilding}
-                style={{ marginTop: 12 }}
-              >
-                {rebuilding ? "重建中，请稍候..." : "重新构建知识库索引"}
-              </button>
-              {rebuildResult && <div className="rebuild-result" style={{ marginTop: 10, padding: '10px 14px', borderRadius: 10, background: '#e8f5e9', color: '#2e7d32', fontSize: 13 }}>{rebuildResult}</div>}
-            </Panel>
+            <Panel title="账号与接口设置" className="settings-panel nested-settings-panel">
+              <p className="muted intro">集中配置网络学堂、邮箱和 AI 接口。密码和 API Key 只会增量写入本地 .env，前端不会回显明文。</p>
+              {settingsLoading && <p className="muted">加载中...</p>}
+              <div className="credential-grid">
+                <section className="credential-section">
+                  <div className="credential-section-title">
+                    <h4>网络学堂</h4>
+                    <StatusPill configured={settingConfigured(settingsStatus, "LEARN_USERNAME") && settingConfigured(settingsStatus, "LEARN_PASSWORD")} />
+                  </div>
+                  <label className="field">
+                    <span>用户名</span>
+                    <input
+                      type="text"
+                      value={localSettings.learn_username}
+                      onChange={(event) => setLocalSettings((current) => ({ ...current, learn_username: event.target.value }))}
+                      placeholder="学号或网络学堂账号"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>密码</span>
+                    <input
+                      type="password"
+                      value={localSettings.learn_password}
+                      onChange={(event) => setLocalSettings((current) => ({ ...current, learn_password: event.target.value }))}
+                      placeholder={maskedSetting(settingsStatus, "LEARN_PASSWORD") || "留空则不修改已保存密码"}
+                    />
+                  </label>
+                </section>
 
-            <Panel title="LLM 模型设置" className="settings-panel">
-              <p className="muted intro">配置 API 地址、密钥、模型等。保存后立即生效，无需重启。</p>
-              {llmConfigLoading && <p className="muted">加载中...</p>}
-              {llmConfig && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+                <section className="credential-section">
+                  <div className="credential-section-title">
+                    <h4>课程邮箱</h4>
+                    <StatusPill configured={settingConfigured(settingsStatus, "MAIL_USERNAME") && settingConfigured(settingsStatus, "MAIL_PASSWORD")} />
+                  </div>
+                  <label className="field">
+                    <span>邮箱用户名</span>
+                    <input
+                      type="text"
+                      value={localSettings.mail_username}
+                      onChange={(event) => setLocalSettings((current) => ({ ...current, mail_username: event.target.value }))}
+                      placeholder="username@mails.tsinghua.edu.cn"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>客户端专用密码</span>
+                    <input
+                      type="password"
+                      value={localSettings.mail_password}
+                      onChange={(event) => setLocalSettings((current) => ({ ...current, mail_password: event.target.value }))}
+                      placeholder={maskedSetting(settingsStatus, "MAIL_PASSWORD") || "留空则不修改已保存密码"}
+                    />
+                  </label>
+                </section>
+
+                <section className="credential-section">
+                  <div className="credential-section-title">
+                    <h4>AI 接口</h4>
+                    <StatusPill configured={settingConfigured(settingsStatus, "LLM_D_API_KEY")} />
+                  </div>
                   <label className="field">
                     <span>API Base URL</span>
                     <input
                       type="text"
-                      value={llmConfig.base_url ?? ""}
-                      onChange={(e) => setLlmConfig({ ...llmConfig, base_url: e.target.value })}
-                      placeholder="https://llmapi.paratera.com"
+                      value={localSettings.llm_base_url}
+                      onChange={(event) => setLocalSettings((current) => ({ ...current, llm_base_url: event.target.value }))}
+                      placeholder="https://api.deepseek.com"
                     />
                   </label>
                   <label className="field">
                     <span>API Key</span>
                     <input
                       type="password"
-                      value={llmConfig.api_key ?? ""}
-                      onChange={(e) => setLlmConfig({ ...llmConfig, api_key: e.target.value })}
-                      placeholder="sk-..."
+                      value={localSettings.llm_api_key}
+                      onChange={(event) => setLocalSettings((current) => ({ ...current, llm_api_key: event.target.value }))}
+                      placeholder={maskedSetting(settingsStatus, "LLM_D_API_KEY") || "sk-..."}
                     />
                   </label>
-                  <label className="field">
-                    <span>模型名称</span>
-                    <input
-                      type="text"
-                      value={llmConfig.model ?? ""}
-                      onChange={(e) => setLlmConfig({ ...llmConfig, model: e.target.value })}
-                      placeholder="deepseek-chat"
-                    />
-                  </label>
-                  <div className="form-row">
+                  <div className="form-row compact-row">
+                    <label className="field">
+                      <span>模型名称</span>
+                      <input
+                        type="text"
+                        value={localSettings.llm_model}
+                        onChange={(event) => setLocalSettings((current) => ({ ...current, llm_model: event.target.value }))}
+                        placeholder="deepseek-chat"
+                      />
+                    </label>
                     <label className="field">
                       <span>超时时间（秒）</span>
                       <input
                         type="number"
-                        value={llmConfig.timeout ?? 60}
-                        onChange={(e) => setLlmConfig({ ...llmConfig, timeout: Number(e.target.value) })}
-                        min={10} max={300}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>最大 Token</span>
-                      <input
-                        type="number"
-                        value={llmConfig.max_tokens ?? 3072}
-                        onChange={(e) => setLlmConfig({ ...llmConfig, max_tokens: Number(e.target.value) })}
-                        min={512} max={16384}
+                        value={localSettings.llm_timeout}
+                        onChange={(event) => setLocalSettings((current) => ({ ...current, llm_timeout: Number(event.target.value) }))}
+                        min={10}
+                        max={300}
                       />
                     </label>
                   </div>
-                  <button className="primary" onClick={saveLlmConfig} style={{ marginTop: 8 }}>
-                    保存 LLM 配置
-                  </button>
-                  {llmConfigSaved && (
-                    <div style={{ padding: '8px 12px', borderRadius: 8, background: '#e8f5e9', color: '#2e7d32', fontSize: 13 }}>
-                      配置已保存，立即生效。
-                    </div>
-                  )}
-                </div>
-              )}
+                </section>
+              </div>
+              <div className="settings-actions">
+                <button className="primary" onClick={saveLocalSettings} disabled={settingsSaving}>
+                  {settingsSaving ? "保存中..." : "保存账号与接口设置"}
+                </button>
+                {settingsSaved && <span className="save-success">设置已保存，后续同步和问答会使用新配置。</span>}
+              </div>
+              {rebuildResult && <div className="rebuild-result">{rebuildResult}</div>}
             </Panel>
           </Panel>
         )}
@@ -1150,6 +1232,26 @@ function HomeworkResult({ result }: { result: AnyRecord }) {
 function ResultList({ title, items, ordered = false }: { title: string; items: string[]; ordered?: boolean }) {
   const content = items.map((item, index) => <li key={index}>{item}</li>);
   return <div className="section-block"><h4>{title}</h4>{ordered ? <ol>{content}</ol> : <ul>{content}</ul>}</div>;
+}
+
+function StatusPill({ configured }: { configured: boolean }) {
+  return (
+    <span className={`config-status ${configured ? "ready" : "missing"}`}>
+      {configured ? "已配置" : "未配置"}
+    </span>
+  );
+}
+
+function settingsFieldValue(fields: AnyRecord, key: string, fallback = ""): string {
+  return String(fields?.[key]?.value ?? fallback);
+}
+
+function settingConfigured(status: AnyRecord | null, key: string): boolean {
+  return Boolean(status?.fields?.[key]?.configured);
+}
+
+function maskedSetting(status: AnyRecord | null, key: string): string {
+  return String(status?.fields?.[key]?.masked ?? "");
 }
 
 function loadPreferences(): Preferences {

@@ -23,6 +23,7 @@ class BackendSettings:
     material_chunks_jsonl: Path = PROJECT_ROOT / "storage" / "material_chunks.jsonl"
     demo_material_chunks_jsonl: Path = PROJECT_ROOT / "storage" / "demo_material_chunks.jsonl"
     knowledge_index_dir: Path = PROJECT_ROOT / "storage" / "knowledge_index"
+    semester_start: str = "2026-02-01"
 
 
     @classmethod
@@ -40,6 +41,7 @@ class BackendSettings:
                 os.getenv("DEMO_MATERIAL_CHUNKS_JSONL", root / "storage" / "demo_material_chunks.jsonl")
             ),
             knowledge_index_dir=Path(os.getenv("KNOWLEDGE_INDEX_DIR", root / "storage" / "knowledge_index")),
+            semester_start=os.getenv("CURRENT_SEMESTER_START", "2026-02-01"),
 
         )
 
