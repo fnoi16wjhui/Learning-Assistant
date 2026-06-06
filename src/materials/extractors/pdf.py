@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import os
 from pathlib import Path
+
+from PIL import Image
 
 from src.materials.extractors.base import MaterialExtractor, MaterialParseError
 from src.materials.extractors.image import ensure_ocr_available, ocr_language, ocr_pil_image
@@ -37,6 +40,18 @@ class PdfExtractor(MaterialExtractor):
                 text = page.extract_text() or ""
             except Exception as exc:
                 raise MaterialParseError(f"PDF page extraction failed: path={path} page={index}") from exc
+            # Attempt to extract and OCR embedded images within the page
+            try:
+                for img_obj in page.images:
+                    try:
+                        pil_image = Image.open(io.BytesIO(img_obj.data))
+                        ocr_text = ocr_pil_image(pil_image)
+                        if ocr_text.strip():
+                            text += "\n" + ocr_text.strip()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             if len("".join(text.split())) >= min_chars:
                 segments.append(
                     MaterialSegment(

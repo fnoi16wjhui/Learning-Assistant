@@ -33,4 +33,16 @@ class CourseTask(CollectorRecord):
         default_factory=list,
         description="Normalized attachments associated with this task.",
     )
+    status: str | None = Field(
+        default=None,
+        description="Normalized upstream status such as unsubmitted, submitted_ungraded, or graded.",
+    )
+    completed: bool | None = Field(
+        default=None,
+        description="Whether the student has completed/submitted the task when known.",
+    )
+    published_at: datetime | None = Field(
+        default=None,
+        description="Upstream open/upload time when provided by Learn.",
+    )
 

@@ -62,9 +62,21 @@ JWCH_SCHEDULE_URL=https://zhjw.cic.tsinghua.edu.cn/portal3rd.do?url=/portal3rd.d
 # 可选。填写真实周一日期后，课表会映射到真实日期；留空时使用 1970-01-05 作为稳定占位周一。
 JWCH_ANCHOR_MONDAY=
 JWCH_EXTRA_JSON={"login_url":"https://info.tsinghua.edu.cn","username_field":"i_user","password_field":"i_pass","trust_path":"storage/learn_trust_device.json","exam_app_id":"81008AA5A89C20D5BDBBDF719D5F0A94","schedule_app_id":"287C0C6D90ABB364CD5FDF1495199962","timeout_seconds":20}
+
+# D 模块 LLM 配置
+# LLM_D_BASE_URL   — OpenAI 兼容 API 地址（不含 /v1/chat/completions 路径）
+# LLM_D_API_KEY    — API 密钥（留空则不带 Authorization 头）
+# LLM_D_MODEL      — 模型名称
+# LLM_D_TIMEOUT    — HTTP 请求超时秒数
+LLM_D_BASE_URL=https://llmapi.paratera.com
+LLM_D_API_KEY=
+LLM_D_MODEL=deepseek-chat
+LLM_D_TIMEOUT=60
 ```
 
 如果密码包含 `#`、空格、引号等特殊字符，建议用英文双引号包住整段值。
+
+> **注意**：`.env.example` 在 D 模块集成后新增了 `LLM_D_BASE_URL` 和 `LLM_D_API_KEY` 等 LLM 配置项。如果你之前已经拷贝过 `.env`，请重新从 `config/.env.example` 复制一份，或手动补上上述 LLM 配置段，否则问答助手将无法正常工作。
 
 ## 为什么 Info / JWCH 可以不填 `JWCH_USERNAME`
 
@@ -132,7 +144,7 @@ python main.py --channel learn --allow-network --output storage/learn.jsonl
 
 - 课程公告。
 - 课程文件 / 课件列表。
-- 作业列表、作业 DDL、作业附件。
+- 作业列表、作业 DDL、详情页完整说明和教师下发附件。
 - 问卷列表。
 - 讨论列表。
 
@@ -246,8 +258,10 @@ JSONL 中只保存附件元数据；文件本体需要单独导出。
 网络学堂附件：
 
 ```powershell
-python scripts\export_attachments.py --source learn --jsonl storage\learn.jsonl --limit 20
+python scripts\export_attachments.py --source learn --jsonl storage\learn.jsonl --semester-start 2026-02-01 --limit 50
 ```
+
+Learn 附件导出默认覆盖旧 manifest，只选择本学期课件，以及本学期中尚未提交或 DDL 尚未到期的作业附件。
 
 邮箱附件：
 
@@ -257,9 +271,51 @@ python scripts\export_attachments.py --source mail --limit 50
 
 导出的文件保存在 `storage/attachments/`，导出清单保存在 `storage/attachments/manifest.jsonl`。这些路径都已被 `.gitignore` 忽略。
 
+前端任务详情中的附件通过后端 `/api/tasks/{task_id}/attachments/{index}` 打开。后端只允许访问任务记录中已存在的网络学堂附件，并将首次下载结果缓存到 `storage/task_attachments/`，因此不会把用户直接跳转到网络学堂。
+
+## 启动应用
+
+前端生产资源已放在 `frontend_static/`。启动后端即可同时访问 API 和页面：
+
+```powershell
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8000/app/
+```
+
+修改 React 前端后，重新构建：
+
+```powershell
+cd frontend
+npm run build
+```
+
 ## 课程资料解析
 
-B 模块负责把本地课程资料解析为 C 模块可索引的标准文本块。默认支持 TXT、Markdown、PDF、DOCX、PPTX；图片 OCR 需要额外安装本机 Tesseract；音频/视频转写需要可选的 `faster-whisper` 和 FFmpeg。PDF 会优先抽取可选文本；当页面文本过少时，会尝试通过 `pdf2image` + Tesseract 做 OCR 回退。
+B 模块负责把本地课程资料解析为 C 模块可索引的标准文本块。默认支持 TXT、Markdown、PDF、DOCX、PPTX、图片、音频/视频。
+
+**各格式文字提取与图片识别：**
+
+| 格式 | 提取方式 | 图片处理 |
+|------|---------|---------|
+| TXT / Markdown | 直接读取文件 | — |
+| PDF | `pypdf` 提取可选文本 + 页面嵌入图片 OCR | 嵌入图片单独 OCR；文字过少的页面整页渲染后 OCR |
+| PPTX | `python-pptx` 提取形状/表格文字 + 幻灯片内图片 OCR | 幻灯片内嵌入图片单独 OCR |
+| DOCX | `python-docx` 提取段落/表格文字 + 嵌入图片 OCR | 文档内嵌入图片单独 OCR（通过 ZIP 解包） |
+| 图片文件 | Tesseract OCR | 整张图 OCR |
+| 音频/视频 | `faster-whisper` ASR | — |
+
+PDF、PPTX 和 DOCX 的嵌入图片 OCR 依赖本地安装的 **Tesseract OCR**（需含中文语言包 `chi_sim`）。若 Tesseract 未安装，图片 OCR 静默跳过，不影响文字提取。OCR 语言默认为 `chi_sim+eng`，可通过 `MATERIAL_OCR_LANG` 环境变量修改。
+
+音频/视频转写需要可选安装 `faster-whisper` 和 FFmpeg。
+
+C 模块索引支持三种检索模式：**关键词**（jieba + TF-IDF）、**向量**（sentence-transformers + 余弦相似度）、**混合**（RRF 融合）。默认使用混合检索，自动结合两种方式的优势——关键词匹配精确术语，语义向量捕捉同义表达。
+
+索引构建时会同时生成关键词和向量索引（需 `sentence-transformers`），若向量索引不可用则自动退化为纯关键词搜索。
 
 解析 A 导出的附件：
 
@@ -405,7 +461,7 @@ python scripts\probe_jwch.py --allow-network --target schedule --parse --anchor-
 
 ## 当前限制
 
-- 网络学堂作业列表能稳定获取标题、DDL、附件；部分作业的完整要求正文取决于详情页接口，若源站详情接口返回异常，`content` 可能只有列表页可见内容。
+- 网络学堂中少数作业的详情页本身没有文字说明，此时 `content` 会为空，前端会提示查看附件或课程通知。
 - 邮箱附件不会自动写入 JSONL，需要用 `scripts/export_attachments.py` 导出文件本体。
 - 课表页面通常只给周几和节次；若不提供 `JWCH_ANCHOR_MONDAY`，日期字段会使用稳定占位周。
 - 单渠道失败不会拖垮 `--channel all`，失败会记录日志并继续其他渠道。

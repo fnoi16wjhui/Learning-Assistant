@@ -6,9 +6,12 @@ This script intentionally uses only the Python standard library.
 from __future__ import annotations
 
 import ast
+import json
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +38,7 @@ SECRET_PATTERNS = [
     re.compile(r"(?i)(cookie|authorization)\s*:\s*['\"][^'\"]{8,}['\"]"),
     re.compile(r"\b\d{10}\b"),
 ]
+COURSE_ID_PATTERN = re.compile(r"\b\d{4}-\d{4}-\d{10}\b")
 TEXT_SUFFIXES = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".env"}
 SAFE_SECRET_MARKERS = {
     "LEARN_PASSWORD",
@@ -148,8 +152,9 @@ def check_sensitive_placeholders() -> list[str]:
         for line_number, line in enumerate(text.splitlines(), start=1):
             if is_safe_secret_context(line):
                 continue
+            scanned_line = COURSE_ID_PATTERN.sub("", line)
             for pattern in SECRET_PATTERNS:
-                if pattern.search(line):
+                if pattern.search(scanned_line):
                     errors.append(f"sensitive-looking value in {path.relative_to(ROOT)}:{line_number}")
                     break
     return errors
@@ -210,6 +215,179 @@ def check_pipeline_sync_state_contract() -> list[str]:
     for fragment in required_fragments:
         if fragment not in text:
             errors.append(f"pipeline sync state fragment missing: {fragment}")
+    return errors
+
+
+def check_learn_course_mapping_contract() -> list[str]:
+    errors: list[str] = []
+    try:
+        from src.parsers.learn_html import (
+            LearnHtmlParser,
+            learn_download_course_id,
+            parse_learn_homework_detail_attachments,
+        )
+    except Exception as exc:
+        return [f"learn parser import failed: {exc}"]
+
+    download_url = (
+        "https://learn.tsinghua.edu.cn/b/wlxt/kczy/zy/student/"
+        "downloadFile/2023-2024-1146571898/file-id"
+    )
+    payload = json.dumps(
+        {
+            "resultList": [
+                {
+                    "id": "homework-id",
+                    "title": "基础物理学1作业",
+                    "attachments": [{"name": "homework.pdf", "url": download_url}],
+                }
+            ]
+        },
+        ensure_ascii=False,
+    )
+    parser = LearnHtmlParser()
+    mismatched = parser.parse(
+        payload,
+        {
+            "content_type": "application/json",
+            "course_id": "2025-2026-2151369145",
+            "course_name": "三年级男生网球",
+            "task_type": "homework",
+            "require_course_id_match": True,
+        },
+    )
+    if mismatched:
+        errors.append("Learn parser kept a homework attachment from a different course ID")
+    if learn_download_course_id(download_url) != "2023-2024-1146571898":
+        errors.append("Learn download URL course ID extraction failed")
+
+    matching_payload = json.dumps(
+        {
+            "resultList": [
+                {
+                    "id": "current-homework",
+                    "wlkcid": "2025-2026-2151369145",
+                    "bt": "本学期作业",
+                    "zt": "未交",
+                    "kssjStr": "2026-06-05 18:11",
+                    "jzsjStr": "2026-06-11 23:59",
+                    "zynrStr": "&lt;p&gt;完成习题&lt;/p&gt;",
+                }
+            ]
+        },
+        ensure_ascii=False,
+    )
+    matching = parser.parse(
+        matching_payload,
+        {
+            "content_type": "application/json",
+            "course_id": "2025-2026-2151369145",
+            "course_name": "三年级男生网球",
+            "task_type": "homework",
+            "task_status": "unsubmitted",
+            "completed": False,
+            "require_course_id_match": True,
+        },
+    )
+    if len(matching) != 1:
+        errors.append("Learn parser rejected a current-course homework")
+    elif matching[0].content != "完成习题":
+        errors.append(f"Learn homework HTML content was not normalized: {matching[0].content!r}")
+    elif matching[0].status != "unsubmitted" or matching[0].completed is not False:
+        errors.append("Learn homework status/completion metadata was not preserved")
+    elif matching[0].published_at is None:
+        errors.append("Learn homework open time was not parsed")
+
+    detail_attachments = parse_learn_homework_detail_attachments(
+        """
+        <a href="/f/wlxt/kc/wj_wjb/student/openNewWindow?fileId=file-1&amp;downloadUrl=/b/wlxt/kczy/zy/student/downloadFile/2025-2026-2151369145/file-1?_csrf=token">
+          作业题目.pdf
+        </a>
+        <a href="/b/wlxt/kczy/zy/student/downloadFile/2025-2026-2151369145/file-1?_csrf=token">下载</a>
+        """,
+        base_url="https://learn.tsinghua.edu.cn",
+    )
+    if len(detail_attachments) != 1:
+        errors.append("Learn homework detail attachment deduplication failed")
+    elif detail_attachments[0].name != "作业题目.pdf":
+        errors.append("Learn homework detail attachment name was not preserved")
+    elif "_csrf" in str(detail_attachments[0].download_url):
+        errors.append("Learn homework detail attachment retained a stale CSRF query")
+    return errors
+
+
+def check_learn_semester_filter_contract() -> list[str]:
+    errors: list[str] = []
+    try:
+        from main import filter_learn_records_for_semester
+        from scripts.export_attachments import is_material_candidate
+        from src.models import CourseTask
+    except Exception as exc:
+        return [f"Learn semester filter import failed: {exc}"]
+
+    timezone = ZoneInfo("Asia/Shanghai")
+    semester_start = datetime(2026, 2, 1, tzinfo=timezone)
+    now = datetime(2026, 6, 6, tzinfo=timezone)
+
+    def homework(
+        raw_id: str,
+        ddl: datetime,
+        *,
+        completed: bool,
+        status: str,
+    ) -> CourseTask:
+        return CourseTask(
+            source="learn",
+            raw_id=raw_id,
+            course_name="测试课程",
+            title=raw_id,
+            content="",
+            task_type="homework",
+            ddl=ddl,
+            published_at=datetime(2026, 3, 1, tzinfo=timezone),
+            completed=completed,
+            status=status,
+        )
+
+    overdue_completed = homework(
+        "overdue-completed",
+        datetime(2026, 5, 1, tzinfo=timezone),
+        completed=True,
+        status="graded",
+    )
+    overdue_unsubmitted = homework(
+        "overdue-unsubmitted",
+        datetime(2026, 5, 1, tzinfo=timezone),
+        completed=False,
+        status="unsubmitted",
+    )
+    future_completed = homework(
+        "future-completed",
+        datetime(2026, 6, 20, tzinfo=timezone),
+        completed=True,
+        status="submitted_ungraded",
+    )
+    old_homework = homework(
+        "old-homework",
+        datetime(2026, 1, 20, tzinfo=timezone),
+        completed=False,
+        status="unsubmitted",
+    )
+    filtered = filter_learn_records_for_semester(
+        [overdue_completed, overdue_unsubmitted, future_completed, old_homework],
+        semester_start,
+        now=now,
+    )
+    raw_ids = {record.raw_id for record in filtered}
+    if raw_ids != {"overdue-unsubmitted", "future-completed"}:
+        errors.append(f"unexpected Learn semester homework filter result: {sorted(raw_ids)}")
+
+    candidate = future_completed.model_dump(mode="json", exclude_none=True)
+    if not is_material_candidate(candidate, semester_start=semester_start, now=now):
+        errors.append("future-DDL homework was excluded from material export")
+    old_candidate = old_homework.model_dump(mode="json", exclude_none=True)
+    if is_material_candidate(old_candidate, semester_start=semester_start, now=now):
+        errors.append("pre-semester homework was included in material export")
     return errors
 
 
@@ -343,6 +521,66 @@ def check_material_parser_contract() -> list[str]:
     return errors
 
 
+def check_module_b_file_contract() -> list[str]:
+    errors: list[str] = []
+    try:
+        import tempfile
+
+        from backend.app.adapters.module_b import ModuleBAdapter
+        from backend.app.settings import BackendSettings
+    except Exception as exc:
+        return [f"module B adapter import failed: {exc}"]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output = Path(tmpdir) / "chunks.jsonl"
+        output.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "source_file": "course/homework.pdf",
+                            "course_name": "基础物理学1",
+                            "title": "homework.pdf",
+                            "material_type": "pdf",
+                            "chunk_index": 0,
+                            "text": "first",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {
+                            "source_file": "course/homework.pdf",
+                            "course_name": "基础物理学1",
+                            "title": "homework.pdf",
+                            "material_type": "pdf",
+                            "chunk_index": 1,
+                            "text": "second",
+                        },
+                        ensure_ascii=False,
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        adapter = ModuleBAdapter(
+            BackendSettings(
+                material_chunks_jsonl=output,
+                demo_material_chunks_jsonl=Path(tmpdir) / "missing.jsonl",
+            )
+        )
+        files = adapter.material_files()
+        if len(files) != 1:
+            errors.append(f"module B returned {len(files)} file records for one source file")
+        elif files[0].get("chunk_count") != 2:
+            errors.append("module B file record has an incorrect chunk count")
+        elif files[0].get("course_name") != "基础物理学1":
+            errors.append("module B file record lost its course name")
+        elif files[0].get("material_id") != "course/homework.pdf":
+            errors.append("module B file record is missing a stable material ID")
+    return errors
+
+
 def run_check(name: str, checker) -> list[str]:
     errors = checker()
     status = "PASS" if not errors else "FAIL"
@@ -362,8 +600,11 @@ def main() -> int:
         ("sensitive placeholders are safe", check_sensitive_placeholders),
         ("mail UID incremental harness", check_mail_uid_incremental),
         ("pipeline sync state contract", check_pipeline_sync_state_contract),
+        ("Learn course mapping contract", check_learn_course_mapping_contract),
+        ("Learn semester filter contract", check_learn_semester_filter_contract),
         ("jwch parser contract", check_jwch_parser_contract),
         ("material parser contract", check_material_parser_contract),
+        ("module B file contract", check_module_b_file_contract),
     ]
     errors: list[str] = []
     for name, checker in checks:

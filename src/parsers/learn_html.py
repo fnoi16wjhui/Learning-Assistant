@@ -6,9 +6,10 @@ import hashlib
 import json
 import re
 from datetime import datetime
+from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Mapping
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
 from src.models import Attachment, CourseTask
@@ -113,7 +114,16 @@ class LearnHtmlParser:
             item = normalize_learn_record(item, meta)
             if not isinstance(item, dict):
                 continue
+            attachments = parse_attachment_items(item.get("attachments"), as_optional_str(meta.get("base_url")))
+            attachments.extend(parse_inline_attachment_fields(item, meta))
+            attachment_course_ids = {
+                course_id
+                for attachment in attachments
+                if (course_id := learn_download_course_id(attachment.download_url))
+            }
             actual_course_id = learn_record_course_id(item)
+            if actual_course_id is None and len(attachment_course_ids) == 1:
+                actual_course_id = next(iter(attachment_course_ids))
             if expected_course_id and (require_course_id_match or actual_course_id):
                 if actual_course_id != expected_course_id:
                     continue
@@ -126,7 +136,7 @@ class LearnHtmlParser:
                 as_optional_str(item.get("bqmc")),
                 f"Learn Item {index + 1}",
             )
-            content = normalize_text(
+            content = normalize_learn_content(
                 first_non_empty(
                     as_optional_str(item.get("content")),
                     as_optional_str(item.get("description")),
@@ -144,8 +154,13 @@ class LearnHtmlParser:
                     "",
                 )
             )
-            attachments = parse_attachment_items(item.get("attachments"), as_optional_str(meta.get("base_url")))
-            attachments.extend(parse_inline_attachment_fields(item, meta))
+            task_type = (
+                as_optional_str(meta.get("task_type"))
+                or as_optional_str(item.get("task_type"))
+                or infer_task_type(content, title)
+            )
+            status = learn_record_status(item, meta, task_type)
+            completed = learn_record_completed(item, meta, task_type, status)
             item_raw_id = (
                 as_optional_str(item.get("id"))
                 or as_optional_str(item.get("zyid"))
@@ -160,17 +175,16 @@ class LearnHtmlParser:
             tasks.append(
                 CourseTask(
                     source=self.source,
-                    task_type=(
-                        as_optional_str(meta.get("task_type"))
-                        or as_optional_str(item.get("task_type"))
-                        or infer_task_type(content, title)
-                    ),
+                    task_type=task_type,
                     raw_id=raw_id,
                     course_name=learn_record_course_name(item) or as_optional_str(meta.get("course_name")) or "Unknown Course",
                     title=title,
                     content=content,
                     ddl=parse_learn_deadline(item, content, meta),
                     attachments=attachments,
+                    status=status,
+                    completed=completed,
+                    published_at=parse_learn_published_at(item),
                 )
             )
         return tasks
@@ -229,6 +243,71 @@ def learn_record_course_name(item: Mapping[str, Any]) -> str | None:
     return None
 
 
+def learn_download_course_id(url: str) -> str | None:
+    """Extract Learn's course ID from homework/file download URLs."""
+
+    path = urlparse(url).path
+    match = re.search(r"/downloadFile/([^/]+)/", path)
+    return match.group(1) if match else None
+
+
+def learn_record_status(
+    item: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    task_type: str,
+) -> str | None:
+    if task_type == "homework":
+        configured = as_optional_str(metadata.get("task_status"))
+        if configured:
+            return configured
+        raw_status = first_non_empty(
+            as_optional_str(item.get("zt")),
+            as_optional_str(item.get("pyzt")),
+        )
+        if "未交" in raw_status:
+            return "unsubmitted"
+        if "已批改" in raw_status:
+            return "graded"
+        if "已交" in raw_status:
+            return "submitted_ungraded"
+    return as_optional_str(item.get("status"))
+
+
+def learn_record_completed(
+    item: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    task_type: str,
+    status: str | None,
+) -> bool | None:
+    configured = metadata.get("completed")
+    if isinstance(configured, bool):
+        return configured
+    if task_type != "homework":
+        return None
+    if status == "unsubmitted":
+        return False
+    if status in {"submitted_ungraded", "graded"}:
+        return True
+    raw_status = first_non_empty(
+        as_optional_str(item.get("zt")),
+        as_optional_str(item.get("pyzt")),
+    )
+    if "未交" in raw_status:
+        return False
+    if "已交" in raw_status or "已批改" in raw_status:
+        return True
+    return None
+
+
+def parse_learn_published_at(item: Mapping[str, Any]) -> datetime | None:
+    return parse_datetime_hint(
+        as_optional_str(item.get("published_at"))
+        or as_optional_str(item.get("kssjStr"))
+        or as_optional_str(item.get("fbsjStr"))
+        or as_optional_str(item.get("scsjStr"))
+    )
+
+
 def normalize_learn_record(item: Any, metadata: Mapping[str, Any]) -> Any:
     """Normalize Learn's array-shaped courseware rows into dict records."""
 
@@ -239,14 +318,73 @@ def normalize_learn_record(item: Any, metadata: Mapping[str, Any]) -> Any:
     file_id = as_optional_str(item[7])
     title = first_non_empty(as_optional_str(item[1]), "Course File")
     description = first_non_empty(as_optional_str(item[5]), "")
+    course_id = as_optional_str(item[4]) if len(item) > 4 else None
+    published_at = as_optional_str(item[6]) if len(item) > 6 else None
+    extension = as_optional_str(item[13]) if len(item) > 13 else None
+    attachment_name = title
+    if extension and not title.lower().endswith(f".{extension.lower().lstrip('.')}"):
+        attachment_name = f"{title}.{extension.lstrip('.')}"
     download_template = as_optional_str(metadata.get("download_url_template"))
     download_url = download_template.format(file_id=file_id) if download_template and file_id else ""
     return {
         "id": as_optional_str(item[0]) or file_id,
         "bt": title,
         "bznr": description,
-        "attachments": [{"name": title, "url": download_url}] if download_url else [],
+        "wlkcid": course_id,
+        "published_at": published_at,
+        "attachments": [{"name": attachment_name, "url": download_url}] if download_url else [],
     }
+
+
+def normalize_learn_content(value: str) -> str:
+    if not value:
+        return ""
+    decoded = unescape(value)
+    if "<" not in decoded or ">" not in decoded:
+        return normalize_text(decoded)
+    parser = _TextAndLinkParser()
+    try:
+        parser.feed(decoded)
+    except Exception:
+        return normalize_text(decoded)
+    return normalize_text(" ".join(parser.text_parts))
+
+
+def parse_learn_homework_detail_attachments(
+    html: str,
+    base_url: str | None = None,
+) -> list[Attachment]:
+    """Extract teacher-provided homework attachments from the detail page."""
+
+    parser = _TextAndLinkParser(base_url=base_url)
+    parser.feed(html)
+    attachments_by_url: dict[str, Attachment] = {}
+    for attachment in parser.links:
+        url = str(attachment.download_url)
+        parsed = urlparse(url)
+        if "openNewWindow" in parsed.path:
+            nested_url = (parse_qs(parsed.query).get("downloadUrl") or [""])[0]
+            if nested_url:
+                url = urljoin(base_url or "", nested_url)
+                parsed = urlparse(url)
+        if "/b/wlxt/kczy/zy/student/downloadFile" not in parsed.path:
+            continue
+        url = remove_query_parameter(url, "_csrf")
+        name = attachment.name
+        existing = attachments_by_url.get(url)
+        if existing is None or (existing.name == "下载" and name != "下载"):
+            attachments_by_url[url] = Attachment(
+                name=name if name != "下载" else "作业附件",
+                download_url=url,
+            )
+    return list(attachments_by_url.values())
+
+
+def remove_query_parameter(url: str, parameter: str) -> str:
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    query.pop(parameter, None)
+    return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
 
 
 def normalize_text(value: str) -> str:

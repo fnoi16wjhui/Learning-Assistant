@@ -13,6 +13,7 @@ storage/*.sqlite3
 storage/*.jsonl
 !storage/demo_*.jsonl
 storage/attachments/
+storage/task_attachments/
 storage/*session*.json
 storage/*trust*.json
 storage/*cookie*.json
@@ -24,3 +25,12 @@ frontend/dist/
 
 # C module knowledge base index
 storage/knowledge_index/
+
+# D module LLM response cache
+storage/llm_cache/
+
+# User uploaded files
+storage/uploads/
+
+# LLM runtime config (written by settings UI)
+storage/llm_config.json

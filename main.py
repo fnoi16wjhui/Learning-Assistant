@@ -20,7 +20,12 @@ from src.adapters.mail_adapter import MailAdapter
 from src.env_loader import load_project_env
 from src.models import CourseTask, ScheduleItem
 from src.parsers.jwch_html import JwchHtmlParser
-from src.parsers.learn_html import LearnHtmlParser
+from src.parsers.learn_html import (
+    LearnHtmlParser,
+    extract_json_records,
+    normalize_learn_content,
+    parse_learn_homework_detail_attachments,
+)
 from src.parsers.mail_mime import MailMimeParser, looks_course_related
 from src.pipeline import DeduplicationStore, configure_logging, filter_new_records, write_jsonl
 
@@ -57,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--criteria", default="ALL", help="IMAP search criteria for mail sync.")
     parser.add_argument("--anchor-monday", help="YYYY-MM-DD Monday used for JWCH weekly schedule timestamps.")
     parser.add_argument("--learn-endpoints-json", help="JSON array overriding configured Learn endpoint specs.")
+    parser.add_argument("--semester-id", help="Learn semester ID override, for example 2025-2026-2.")
     parser.add_argument("--retries", type=int, default=2, help="Attempts per channel before reporting failure.")
     parser.add_argument("--retry-delay", type=float, default=2.0, help="Initial retry delay in seconds.")
     return parser
@@ -121,7 +127,7 @@ def sync_channel(channel: str, args: argparse.Namespace) -> SyncResult:
     else:
         raise ValueError(f"unsupported channel: {channel}")
 
-    fresh = filter_new_records(records, store)
+    fresh = records if channel == "learn" else filter_new_records(records, store)
     write_jsonl(fresh, output_path)
     return SyncResult(
         channel=channel,
@@ -198,7 +204,7 @@ def sync_learn(args: argparse.Namespace) -> tuple[list[RawPayload], list[Pipelin
     parser = LearnHtmlParser()
     endpoint_override = args.learn_endpoints_json or os.getenv("LEARN_ENDPOINTS_JSON")
     if not endpoint_override:
-        return sync_learn_business(adapter, parser)
+        return sync_learn_business(adapter, parser, semester_id_override=args.semester_id)
 
     endpoint_specs = load_learn_endpoint_specs(endpoint_override)
     raw_payloads: list[RawPayload] = []
@@ -221,20 +227,23 @@ def sync_learn(args: argparse.Namespace) -> tuple[list[RawPayload], list[Pipelin
 def sync_learn_business(
     adapter: LearnAdapter,
     parser: LearnHtmlParser,
+    semester_id_override: str | None = None,
 ) -> tuple[list[RawPayload], list[PipelineRecord]]:
     """Sync Learn course business JSON for courses, homework, files, questionnaires, and discussions."""
 
     raw_payloads: list[RawPayload] = []
     records: list[PipelineRecord] = []
-    semester_payload, semester_data = fetch_learn_json(
-        adapter,
-        "/b/kc/zhjw_v_code_xnxq/getCurrentAndNextSemester",
-        raw_id="learn_current_semester",
-    )
-    raw_payloads.append(semester_payload)
-    semester_id = ((semester_data.get("result") or {}) if isinstance(semester_data, dict) else {}).get("xnxq")
-    if not isinstance(semester_id, str) or not semester_id:
-        raise ValueError("Learn current semester response missing result.xnxq")
+    semester_id = semester_id_override
+    if not semester_id:
+        semester_payload, semester_data = fetch_learn_json(
+            adapter,
+            "/b/kc/zhjw_v_code_xnxq/getCurrentAndNextSemester",
+            raw_id="learn_current_semester",
+        )
+        raw_payloads.append(semester_payload)
+        semester_id = ((semester_data.get("result") or {}) if isinstance(semester_data, dict) else {}).get("xnxq")
+        if not isinstance(semester_id, str) or not semester_id:
+            raise ValueError("Learn current semester response missing result.xnxq")
     semester_start = learn_semester_start(semester_id)
 
     locale = str(adapter.config.extra.get("locale") or "zh")
@@ -256,7 +265,7 @@ def sync_learn_business(
             continue
         course_name = as_optional_str(course.get("kcm")) or as_optional_str(course.get("ywkcm")) or "Unknown Course"
         for spec in default_learn_business_specs(course_id):
-            payload, _ = fetch_learn_json(
+            payload, payload_data = fetch_learn_json(
                 adapter,
                 spec["endpoint"],
                 raw_id=f"learn_{spec['name']}_{course_id}",
@@ -272,6 +281,8 @@ def sync_learn_business(
                 "course_id": course_id,
                 "course_name": course_name,
                 "task_type": spec["task_type"],
+                "task_status": spec.get("task_status"),
+                "completed": spec.get("completed"),
                 "require_course_id_match": bool(spec.get("require_course_id_match")),
                 "base_url": adapter.require("base_url"),
                 "homework_attachment_url_template": "/b/wlxt/kczy/zy/student/downloadFile/{wlkcid}/{file_id}",
@@ -283,11 +294,95 @@ def sync_learn_business(
                 payload.content,
                 parser_metadata,
             )
-            records.extend(filter_learn_records_for_semester(parsed_records, semester_start))
+            filtered_records = filter_learn_records_for_semester(parsed_records, semester_start)
+            if spec["task_type"] == "homework" and filtered_records:
+                detail_payloads, filtered_records = enrich_learn_homework_records(
+                    adapter,
+                    filtered_records,
+                    payload_data,
+                )
+                raw_payloads.extend(detail_payloads)
+            records.extend(filtered_records)
         courseware_payloads, courseware_records = sync_learn_courseware_files(adapter, parser, course_id, course_name)
         raw_payloads.extend(courseware_payloads)
-        records.extend(courseware_records)
+        records.extend(filter_learn_records_for_semester(courseware_records, semester_start))
     return raw_payloads, records
+
+
+def enrich_learn_homework_records(
+    adapter: LearnAdapter,
+    records: list[PipelineRecord],
+    list_data: dict[str, Any],
+) -> tuple[list[RawPayload], list[PipelineRecord]]:
+    """Load homework instructions and teacher attachments hidden behind the detail page."""
+
+    raw_items = extract_json_records(list_data)
+    if not isinstance(raw_items, list):
+        return [], records
+    items_by_id = {
+        str(item.get("zyid")): item
+        for item in raw_items
+        if isinstance(item, dict) and item.get("zyid")
+    }
+    base_url = adapter.require("base_url")
+    raw_payloads: list[RawPayload] = []
+    enriched: list[PipelineRecord] = []
+    for record in records:
+        if not isinstance(record, CourseTask) or record.task_type != "homework":
+            enriched.append(record)
+            continue
+        homework_id = record.raw_id.rsplit("_", 1)[-1]
+        item = items_by_id.get(homework_id)
+        if not item:
+            enriched.append(record)
+            continue
+
+        content = record.content
+        detail_payload, detail_data = fetch_learn_json(
+            adapter,
+            "/b/wlxt/kczy/zy/student/detail",
+            raw_id=f"learn_homework_detail_{homework_id}",
+            data={"id": homework_id},
+            method="post",
+        )
+        raw_payloads.append(detail_payload)
+        detail_message = detail_data.get("msg")
+        if isinstance(detail_message, str) and detail_message.strip():
+            content = normalize_learn_content(detail_message)
+
+        attachments = list(record.attachments)
+        course_id = as_optional_str(item.get("wlkcid"))
+        student_homework_id = as_optional_str(item.get("xszyid"))
+        if course_id and student_homework_id:
+            view_endpoint = (
+                "/f/wlxt/kczy/zy/student/viewZy"
+                f"?wlkcid={course_id}&sfgq=0&zyid={homework_id}&xszyid={student_homework_id}"
+            )
+            view_payload = adapter.fetch_endpoint(
+                view_endpoint,
+                raw_id=f"learn_homework_view_{homework_id}",
+                content_type="text/html",
+            )
+            raw_payloads.append(view_payload)
+            attachments.extend(
+                parse_learn_homework_detail_attachments(
+                    str(view_payload.content),
+                    base_url=base_url,
+                )
+            )
+
+        deduplicated = {}
+        for attachment in attachments:
+            deduplicated[str(attachment.download_url)] = attachment
+        enriched.append(
+            record.model_copy(
+                update={
+                    "content": content,
+                    "attachments": list(deduplicated.values()),
+                }
+            )
+        )
+    return raw_payloads, enriched
 
 
 def learn_semester_start(semester_id: str) -> datetime | None:
@@ -311,19 +406,32 @@ def learn_semester_start(semester_id: str) -> datetime | None:
 def filter_learn_records_for_semester(
     records: list[PipelineRecord],
     semester_start: datetime | None,
+    *,
+    now: datetime | None = None,
 ) -> list[PipelineRecord]:
     if semester_start is None:
         return records
+    current_time = normalize_datetime(now or datetime.now(LEARN_LOCAL_TIMEZONE))
     filtered: list[PipelineRecord] = []
     for record in records:
-        if (
-            isinstance(record, CourseTask)
-            and record.source == "learn"
-            and record.task_type == "homework"
-            and record.ddl is not None
-            and normalize_datetime(record.ddl) < semester_start
-        ):
-            continue
+        if isinstance(record, CourseTask) and record.source == "learn":
+            if record.task_type == "homework":
+                ddl = normalize_datetime(record.ddl) if record.ddl is not None else None
+                published_at = (
+                    normalize_datetime(record.published_at)
+                    if record.published_at is not None
+                    else None
+                )
+                if ddl is not None and ddl < semester_start:
+                    continue
+                if ddl is None and published_at is not None and published_at < semester_start:
+                    continue
+                if record.completed is not False and (ddl is None or ddl < current_time):
+                    continue
+            elif record.task_type == "file" and record.published_at is not None:
+                published_at = normalize_datetime(record.published_at)
+                if published_at < semester_start or published_at > current_time:
+                    continue
         filtered.append(record)
     return filtered
 
@@ -379,6 +487,8 @@ def default_learn_business_specs(course_id: str) -> list[dict[str, Any]]:
         {
             "name": "homework_unsubmitted",
             "task_type": "homework",
+            "task_status": "unsubmitted",
+            "completed": False,
             "endpoint": "/b/wlxt/kczy/zy/student/zyListWj",
             "params": common_params,
             "require_course_id_match": True,
@@ -386,6 +496,8 @@ def default_learn_business_specs(course_id: str) -> list[dict[str, Any]]:
         {
             "name": "homework_submitted_ungraded",
             "task_type": "homework",
+            "task_status": "submitted_ungraded",
+            "completed": True,
             "endpoint": "/b/wlxt/kczy/zy/student/zyListYjwg",
             "params": common_params,
             "require_course_id_match": True,
@@ -393,6 +505,8 @@ def default_learn_business_specs(course_id: str) -> list[dict[str, Any]]:
         {
             "name": "homework_graded",
             "task_type": "homework",
+            "task_status": "graded",
+            "completed": True,
             "endpoint": "/b/wlxt/kczy/zy/student/zyListYpg",
             "params": common_params,
             "require_course_id_match": True,

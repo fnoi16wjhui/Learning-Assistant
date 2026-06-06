@@ -656,6 +656,14 @@ def load_attachment_manifest(path: str | Path) -> dict[str, dict[str, Any]]:
             "attachment_name": item.get("attachment_name"),
             "content_type": item.get("content_type"),
             "bytes": item.get("bytes"),
+            "course_id": item.get("course_id"),
+            "course_name": item.get("course_name"),
+            "source_title": item.get("source_title"),
+            "source_task_type": item.get("source_task_type"),
+            "published_at": item.get("published_at"),
+            "ddl": item.get("ddl"),
+            "task_status": item.get("task_status"),
+            "completed": item.get("completed"),
         }
     return metadata
 
@@ -686,7 +694,9 @@ def enrich_metadata_from_records(
     for metadata in metadata_by_path.values():
         raw_id = metadata.get("record_raw_id")
         if isinstance(raw_id, str) and raw_id in by_raw_id:
-            metadata.update({key: value for key, value in by_raw_id[raw_id].items() if value})
+            for key, value in by_raw_id[raw_id].items():
+                if value and not metadata.get(key):
+                    metadata[key] = value
     return metadata_by_path
 
 
