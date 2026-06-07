@@ -309,7 +309,29 @@ B 模块负责把本地课程资料解析为 C 模块可索引的标准文本块
 | 图片文件 | Tesseract OCR | 整张图 OCR |
 | 音频/视频 | `faster-whisper` ASR | — |
 
-PDF、PPTX 和 DOCX 的嵌入图片 OCR 依赖本地安装的 **Tesseract OCR**（需含中文语言包 `chi_sim`）。若 Tesseract 未安装，图片 OCR 静默跳过，不影响文字提取。OCR 语言默认为 `chi_sim+eng`，可通过 `MATERIAL_OCR_LANG` 环境变量修改。
+PDF、PPTX 和 DOCX 的嵌入图片 OCR 依赖本地安装的 **Tesseract OCR**（需含中文语言包 `chi_sim`）。若 Tesseract 未安装，图片 OCR 静默跳过，不影响文字提取；直接上传图片文件时则会提示 OCR 不可用。OCR 语言默认为 `chi_sim+eng`，可通过 `MATERIAL_OCR_LANG` 环境变量修改。
+
+Windows 上可用 `winget` 安装 OCR 引擎：
+
+```powershell
+winget install --id UB-Mannheim.TesseractOCR --source winget --accept-package-agreements --accept-source-agreements
+```
+
+部分安装包只自带英文语言包。若需要识别中文题目截图，请下载中英文语言数据到本地用户目录：
+
+```powershell
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\LearningAssistantTools\tessdata" | Out-Null
+Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata" -OutFile "$env:LOCALAPPDATA\LearningAssistantTools\tessdata\chi_sim.traineddata"
+Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata" -OutFile "$env:LOCALAPPDATA\LearningAssistantTools\tessdata\eng.traineddata"
+```
+
+项目会自动尝试使用 `C:\Program Files\Tesseract-OCR\tesseract.exe` 和 `%LOCALAPPDATA%\LearningAssistantTools\tessdata`。如果安装在其他位置，可在 `.env` 中显式配置：
+
+```env
+TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+TESSDATA_PREFIX=C:\Users\<你的用户名>\AppData\Local\LearningAssistantTools\tessdata
+MATERIAL_OCR_LANG=chi_sim+eng
+```
 
 音频/视频转写需要可选安装 `faster-whisper` 和 FFmpeg。
 
