@@ -125,6 +125,19 @@ SUMMARY_SYSTEM = """\
 请严格返回 JSON：
 {"summary": "详细总结", "key_points": ["要点1", ...], "citations": [...]}"""
 
+DOCUMENT_ANALYSIS_SYSTEM = """\
+你是一个专业的课程资料分析助手。你的任务是深度分析用户指定的**单个文件**，而不是泛泛地总结课程。
+
+## 分析要求
+1. **聚焦此文**：只分析这份文件的内容，不要引入其他资料或课程信息。
+2. **深度解读**：提炼文件的核心论点、关键概念、论证逻辑和结论。
+3. **结构拆解**：说明文件的结构组织（章节/段落如何展开），帮助读者快速建立认知框架。
+4. **要点标注**：给出 4-7 个关键要点，直接对应文件中的具体内容。
+5. **难点提示**：如果文件中有复杂概念或数学推导，指出并简要解释。
+
+请严格返回 JSON：
+{"summary": "对这份文件的深度分析", "key_points": ["关键要点1", ...], "citations": [{"title": "文件名", "source": "文件路径", "snippet": "引用片段"}]}"""
+
 HOMEWORK_SYSTEM = """\
 你是一个课程作业辅导助手。
 
@@ -440,6 +453,59 @@ def _search_c_module(
 
 
 # ---------------------------------------------------------------------------
+# B-module material lookup (D → B)
+# ---------------------------------------------------------------------------
+
+_MATERIAL_CACHE: list[dict[str, Any]] | None = None
+
+
+def _load_material_chunks() -> list[dict[str, Any]]:
+    """Load all material chunks from B-module output.  [D → B]"""
+    global _MATERIAL_CACHE
+    if _MATERIAL_CACHE is not None:
+        return _MATERIAL_CACHE
+    chunks: list[dict[str, Any]] = []
+    path = settings.material_chunks_jsonl
+    if path.exists():
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        if isinstance(rec, dict):
+                            chunks.append(rec)
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            pass
+    _MATERIAL_CACHE = chunks
+    return chunks
+
+
+def _find_material_chunks(material_id: str) -> list[dict[str, Any]]:
+    """Find all chunks belonging to a specific material.  [D → B]
+
+    material_id can be: file_hash, source_file, or a material_id field.
+    """
+    all_chunks = _load_material_chunks()
+    matched: list[dict[str, Any]] = []
+    mid = material_id.strip()
+    for c in all_chunks:
+        if (c.get("file_hash") == mid
+                or c.get("source_file") == mid
+                or c.get("material_id") == mid
+                or str(c.get("source_file", "")).endswith(mid)
+                or str(c.get("source_file", "")).endswith(mid.replace("/", "\\"))):
+            matched.append(c)
+    # Sort by page/slide then chunk_index
+    matched.sort(key=lambda c: (c.get("page") or c.get("slide") or 0, c.get("chunk_index", 0)))
+    return matched
+
+
+# ---------------------------------------------------------------------------
 # Context building
 # ---------------------------------------------------------------------------
 
@@ -703,8 +769,68 @@ class ModuleDAdapter:
             )
 
     # ---- Summaries  [D → LLM plan → A + C search → LLM summary] -----------
+    #
+    #  Two modes:
+    #    a) material_id is set → single-file deep analysis  [D → B]
+    #    b) material_id empty   → full-course multi-source summary  [D → A + C]
 
     def summarize(self, request: SummaryRequest) -> dict[str, Any]:
+        # --- Mode A: single-file analysis  [D → B] -------------------------
+        if request.material_id:
+            material_chunks = _find_material_chunks(request.material_id)
+            if not material_chunks:
+                return {
+                    "summary": f"未找到指定文件（material_id={request.material_id}），请重新选择。",
+                    "key_points": [],
+                    "citations": [],
+                    "retrieved": {"a_module": 0, "c_module": 0, "material_chunks": 0},
+                    "source_module": "D",
+                    "status": "missing",
+                }
+
+            file_title = material_chunks[0].get("title", "未知文件")
+            file_source = material_chunks[0].get("source_file", "")
+            file_course = material_chunks[0].get("course_name", "")
+            chunk_texts = [c.get("text", "") for c in material_chunks if c.get("text", "").strip()]
+            combined = "\n\n---\n\n".join(chunk_texts)
+            user_topic = request.topic or f"分析《{file_title}》的核心内容"
+
+            messages = [
+                {"role": "system", "content": DOCUMENT_ANALYSIS_SYSTEM},
+                {
+                    "role": "user",
+                    "content": (
+                        f"【文件信息】\n"
+                        f"文件名：{file_title}\n"
+                        f"所属课程：{file_course}\n"
+                        f"文件路径：{file_source}\n\n"
+                        f"【文件内容】\n{combined}\n\n"
+                        f"【分析请求】\n{user_topic}"
+                    ),
+                },
+            ]
+
+            try:
+                parsed = _llm_chat(messages, temperature=0.4)
+                return {
+                    "summary": parsed.get("summary", ""),
+                    "key_points": parsed.get("key_points", []),
+                    "citations": parsed.get("citations", [])
+                    or [{"title": file_title, "source": file_source, "snippet": chunk_texts[0][:200] if chunk_texts else ""}],
+                    "retrieved": {"a_module": 0, "c_module": 0, "material_chunks": len(material_chunks)},
+                    "source_module": "D",
+                    "status": "ready",
+                }
+            except Exception as exc:
+                return _blocked_payload(
+                    exc,
+                    summary=f"无法分析文件：{_classify_llm_error(exc)['user_message']}",
+                    key_points=[],
+                    citations=[],
+                    retrieved={"a_module": 0, "c_module": 0, "material_chunks": len(material_chunks)},
+                )
+
+        # --- Mode B: full-course multi-source summary  [D → A + C] -----------
         topic = request.topic or request.course_name or "课程内容总结"
         question = f"总结：{topic}"
 
@@ -722,7 +848,7 @@ class ModuleDAdapter:
             context_blocks.append(f"【相关任务与通知】\n{a_ctx}")
         combined = "\n\n========\n\n".join(context_blocks) or "暂无相关资料。"
 
-        scope = request.topic or request.course_name or request.material_id or "当前课程"
+        scope = request.topic or request.course_name or "当前课程"
         messages = [
             {"role": "system", "content": SUMMARY_SYSTEM},
             {
