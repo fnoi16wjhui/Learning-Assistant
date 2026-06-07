@@ -7,6 +7,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ from dotenv import load_dotenv
 # Load .env before any adapter imports so env vars are available at module level
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -40,6 +41,7 @@ from backend.app.models import (
 )
 from backend.app.response_utils import module_response, normalize_list_items, safe_call
 from backend.app.settings import settings
+from src.materials.extractors import MaterialParseError, extractor_for_path
 
 
 app = FastAPI(title="Learning Assistant E Module API", version="0.2.0")
@@ -453,11 +455,55 @@ def parse_materials(request: MaterialParseRequest) -> dict[str, Any]:
 
 
 @app.post("/api/materials/upload")
-def upload_material() -> dict[str, Any]:
+async def upload_material(file: UploadFile = File(...)) -> dict[str, Any]:
+    return await _extract_uploaded_file(file)
+
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
+    return await _extract_uploaded_file(file)
+
+
+async def _extract_uploaded_file(file: UploadFile) -> dict[str, Any]:
+    suffix = Path(file.filename or "upload").suffix.lower()
+    if not suffix:
+        raise HTTPException(status_code=400, detail="上传文件缺少扩展名，无法判断格式。")
+    payload = await file.read()
+    if len(payload) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="上传文件超过 20MB，请压缩后再试。")
+
+    with tempfile.TemporaryDirectory(prefix="learning-assistant-upload-") as temp_dir:
+        path = Path(temp_dir) / f"upload{suffix}"
+        path.write_bytes(payload)
+        try:
+            if suffix in {".txt", ".md"}:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+                methods = ["plain_text"]
+            else:
+                extractor = extractor_for_path(path)
+                segments = extractor.extract(path)
+                text = "\n\n".join(segment.text for segment in segments if segment.text.strip())
+                methods = sorted(
+                    {
+                        str(method)
+                        for segment in segments
+                        if (method := segment.metadata.get("extraction_method"))
+                    }
+                )
+        except MaterialParseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"文件解析失败：{type(exc).__name__}") from exc
+
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="文件已上传，但未提取到可用文字。")
     return module_response(
         source_module="B",
-        status="accepted",
-        message="Upload endpoint is reserved for B module parser integration.",
+        status="ready",
+        filename=file.filename,
+        text=text[:50000],
+        text_length=len(text),
+        extraction_methods=methods,
     )
 
 

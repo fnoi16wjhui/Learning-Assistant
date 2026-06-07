@@ -27,7 +27,7 @@ from src.parsers.learn_html import (
     parse_learn_homework_detail_attachments,
 )
 from src.parsers.mail_mime import MailMimeParser, looks_course_related
-from src.pipeline import DeduplicationStore, configure_logging, filter_new_records, write_jsonl
+from src.pipeline import DeduplicationStore, configure_logging, filter_new_records, upsert_jsonl_by_raw_id, write_jsonl
 
 
 NETWORK_CHANNELS = {"learn", "mail", "jwch"}
@@ -127,13 +127,17 @@ def sync_channel(channel: str, args: argparse.Namespace) -> SyncResult:
     else:
         raise ValueError(f"unsupported channel: {channel}")
 
-    fresh = records if channel == "learn" else filter_new_records(records, store)
-    write_jsonl(fresh, output_path)
+    if channel == "learn":
+        fresh = records
+        fresh_count = upsert_jsonl_by_raw_id(fresh, output_path)
+    else:
+        fresh = filter_new_records(records, store)
+        fresh_count = write_jsonl(fresh, output_path)
     return SyncResult(
         channel=channel,
         raw_count=len(raw_payloads),
         parsed_count=len(records),
-        fresh_count=len(fresh),
+        fresh_count=fresh_count,
         output_path=output_path,
     )
 

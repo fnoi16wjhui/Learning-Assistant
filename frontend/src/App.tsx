@@ -49,7 +49,7 @@ const defaultLocalSettingsForm: LocalSettingsForm = {
   mail_password: "",
   llm_base_url: "https://api.deepseek.com",
   llm_api_key: "",
-  llm_model: "deepseek-chat",
+  llm_model: "deepseek-v4-pro",
   llm_timeout: 60,
 };
 
@@ -274,8 +274,10 @@ export function App() {
       const formData = new FormData();
       formData.append("file", file);
       const response = await fetch(apiUrl("/api/upload"), { method: "POST", body: formData });
-      if (!response.ok) throw new Error(`上传失败: ${response.status}`);
       const data = await response.json() as AnyRecord;
+      if (!response.ok) {
+        throw new Error(data.detail ?? data.message ?? `上传失败: ${response.status}`);
+      }
       setUploadedFiles((prev) =>
         prev.map((f) => (f.name === file.name ? { name: file.name, text: data.text || "", loading: false } : f))
       );
@@ -338,7 +340,7 @@ export function App() {
         mail_password: "",
         llm_base_url: settingsFieldValue(fields, "LLM_D_BASE_URL", "https://api.deepseek.com"),
         llm_api_key: "",
-        llm_model: settingsFieldValue(fields, "LLM_D_MODEL", "deepseek-chat"),
+        llm_model: settingsFieldValue(fields, "LLM_D_MODEL", "deepseek-v4-pro"),
         llm_timeout: Number(settingsFieldValue(fields, "LLM_D_TIMEOUT", "60")) || 60,
       }));
     } catch {
@@ -797,7 +799,7 @@ export function App() {
                         type="text"
                         value={localSettings.llm_model}
                         onChange={(event) => setLocalSettings((current) => ({ ...current, llm_model: event.target.value }))}
-                        placeholder="deepseek-chat"
+                        placeholder="deepseek-v4-pro"
                       />
                     </label>
                     <label className="field">

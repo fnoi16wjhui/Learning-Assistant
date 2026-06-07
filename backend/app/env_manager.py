@@ -51,7 +51,7 @@ DEFAULT_ENV_VALUES = {
     "JWCH_SCHEDULE_URL": "https://zhjw.cic.tsinghua.edu.cn/portal3rd.do?url=/portal3rd.do&m=bks_yjkbSearch",
     "JWCH_EXTRA_JSON": '{"login_url":"https://info.tsinghua.edu.cn","username_field":"i_user","password_field":"i_pass","trust_path":"storage/learn_trust_device.json","exam_app_id":"81008AA5A89C20D5BDBBDF719D5F0A94","schedule_app_id":"287C0C6D90ABB364CD5FDF1495199962","timeout_seconds":20}',
     "LLM_D_BASE_URL": "https://api.deepseek.com",
-    "LLM_D_MODEL": "deepseek-chat",
+    "LLM_D_MODEL": "deepseek-v4-pro",
     "LLM_D_TIMEOUT": "60",
 }
 

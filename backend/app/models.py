@@ -50,6 +50,7 @@ class SummaryRequest(BaseModel):
 class HomeworkAssistantRequest(BaseModel):
     task_id: str | None = None
     question: str = Field(..., min_length=1)
+    upload_texts: list[str] = Field(default_factory=list)
 
 
 class LocalSettingsRequest(BaseModel):

@@ -37,7 +37,7 @@ def _llm_api_key() -> str:
 
 
 def _llm_model() -> str:
-    return os.getenv("LLM_D_MODEL", "deepseek-chat")
+    return os.getenv("LLM_D_MODEL", "deepseek-v4-pro")
 
 
 def _llm_timeout() -> int:
@@ -52,6 +52,11 @@ _client: openai.OpenAI | None = None
 _client_signature: tuple[str, str] | None = None
 
 SEMESTER_CUTOFF = settings.semester_start
+
+
+def _current_time_text() -> str:
+    tz = timezone(timedelta(hours=8))
+    return datetime.now(tz).strftime("%Y年%m月%d日 %H:%M %A（北京时间）")
 
 def _get_client() -> openai.OpenAI:
     global _client, _client_signature
@@ -341,6 +346,72 @@ def _search_a_module(
     return results[:max_results]
 
 
+def _is_homework_deadline_query(question: str) -> bool:
+    return any(token in question for token in ("作业", "DDL", "ddl", "截止", "提交", "要交"))
+
+
+def _course_matches(record_course: Any, course_hint: str | None) -> bool:
+    if not course_hint:
+        return True
+    left = _normalize_course_text(str(record_course or ""))
+    right = _normalize_course_text(course_hint)
+    return bool(left and right and (left == right or left in right or right in left))
+
+
+def _normalize_course_text(value: str) -> str:
+    return (
+        value.lower()
+        .replace(" ", "")
+        .replace("（", "(")
+        .replace("）", ")")
+        .replace("Ⅱ", "ii")
+        .replace("ⅱ", "ii")
+    )
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone(timedelta(hours=8)))
+    return parsed.astimezone(timezone(timedelta(hours=8)))
+
+
+def _search_pending_homework(course_hint: str | None, max_results: int = 10) -> list[dict[str, Any]]:
+    """Deterministic lookup for deadline questions; avoids schedules and expired homework."""
+
+    now = datetime.now(timezone(timedelta(hours=8)))
+    results: list[dict[str, Any]] = []
+    for rec in _load_all_records():
+        if rec.get("task_type") != "homework":
+            continue
+        if not _course_matches(rec.get("course_name"), course_hint):
+            continue
+        if rec.get("completed") is True or rec.get("status") in {"submitted_ungraded", "graded", "submitted"}:
+            continue
+        ddl = _parse_datetime(rec.get("ddl"))
+        if ddl is not None and ddl < now:
+            continue
+        score = 10
+        if rec.get("completed") is False or rec.get("status") == "unsubmitted":
+            score += 5
+        if ddl is not None:
+            score += 3
+        results.append({**rec, "_score": score})
+    results.sort(
+        key=lambda r: (
+            _parse_datetime(r.get("ddl")) is None,
+            (_parse_datetime(r.get("ddl")) or datetime.max.replace(tzinfo=timezone(timedelta(hours=8)))).timestamp(),
+            str(r.get("title") or ""),
+        )
+    )
+    return results[:max_results]
+
+
 # ---------------------------------------------------------------------------
 # C-module search (D 调用 C 模块)
 # ---------------------------------------------------------------------------
@@ -383,7 +454,20 @@ def _format_a_results(records: list[dict[str, Any]]) -> str:
         title = r.get("title", "无标题")
         course = r.get("course_name", "未知课程")
         content = r.get("content", "")
-        parts.append(f"[A{i}] [{src_label}]《{title}》({course})\n{content}")
+        meta_lines = []
+        if r.get("task_type"):
+            meta_lines.append(f"类型: {r.get('task_type')}")
+        if r.get("ddl"):
+            meta_lines.append(f"截止时间: {r.get('ddl')}")
+        if r.get("status"):
+            meta_lines.append(f"提交状态: {r.get('status')}")
+        if r.get("completed") is not None:
+            meta_lines.append(f"是否完成: {r.get('completed')}")
+        if r.get("published_at"):
+            meta_lines.append(f"发布时间: {r.get('published_at')}")
+        meta = "\n".join(meta_lines)
+        body = "\n".join(part for part in (meta, content) if part)
+        parts.append(f"[A{i}] [{src_label}]《{title}》({course})\n{body}")
     return "\n\n".join(parts)
 
 
@@ -405,10 +489,19 @@ def _merge_citations(a_records: list[dict], c_chunks: list[dict]) -> list[dict]:
     """Build citation list from both A and C results."""
     citations: list[dict] = []
     for i, r in enumerate(a_records[:5]):
+        snippet_parts = []
+        if r.get("ddl"):
+            snippet_parts.append(f"截止时间: {r.get('ddl')}")
+        if r.get("status"):
+            snippet_parts.append(f"提交状态: {r.get('status')}")
+        if r.get("completed") is not None:
+            snippet_parts.append(f"是否完成: {r.get('completed')}")
+        if r.get("content"):
+            snippet_parts.append(str(r.get("content"))[:200])
         citations.append({
             "title": r.get("title", "无标题"),
             "source": f"A模块-{r.get('_source', 'unknown')}",
-            "snippet": (r.get("content") or "")[:200],
+            "snippet": "\n".join(snippet_parts),
         })
     for i, c in enumerate(c_chunks[:5]):
         citations.append({
@@ -440,9 +533,7 @@ def _fallback_plan(question: str, course_name: str | None) -> dict[str, Any]:
 
 def _plan_query(question: str, course_name: str | None) -> dict[str, Any]:
     """Stage 1: LLM analyzes question → search plan."""
-    tz = timezone(timedelta(hours=8))
-    today = datetime.now(tz).strftime("%Y年%m月%d日 %A")
-    planning_prompt = PLAN_SYSTEM.format(today=today)
+    planning_prompt = PLAN_SYSTEM.format(today=_current_time_text())
 
     messages = [
         {"role": "system", "content": planning_prompt},
@@ -515,13 +606,21 @@ class ModuleDAdapter:
         kb = self._get_kb()
         queries = plan.get("queries", [question])
         sources = plan.get("sources", ["knowledge_base", "tasks", "emails", "schedules"])
-        course_hint = plan.get("course_hint") or course_name
+        course_hint = course_name or plan.get("course_hint")
+        question_text = f"{question} {' '.join(str(q) for q in queries)}"
+        deadline_query = _is_homework_deadline_query(question_text)
+        if deadline_query:
+            sources = list(dict.fromkeys(["tasks", *sources]))
+            queries = list(dict.fromkeys([question, *(str(q) for q in queries if q)]))
 
         a_results: list[dict] = []
         c_results: list[dict] = []
 
         a_sources = [s for s in sources if s in ("tasks", "emails", "schedules")]
-        if a_sources:
+        if deadline_query:
+            a_results = _search_pending_homework(course_hint)
+            sources = ["tasks", *[s for s in sources if s == "knowledge_base"]]
+        elif a_sources:
             combined_query = " ".join(str(q) for q in queries if q)
             a_results = _search_a_module(combined_query, a_sources, course_hint)
 
@@ -565,15 +664,22 @@ class ModuleDAdapter:
 
         messages = [
             {"role": "system", "content": QA_SYSTEM},
-            {"role": "user", "content": f"【多源参考资料】\n{combined}\n\n【问题】\n{request.question}"},
+            {
+                "role": "user",
+                "content": (
+                    f"【当前时间】\n{_current_time_text()}\n\n"
+                    f"【多源参考资料】\n{combined}\n\n"
+                    f"【问题】\n{request.question}"
+                ),
+            },
         ]
 
         try:
             parsed = _llm_chat(messages, temperature=0.5)
             return {
                 "answer": parsed.get("answer", ""),
-                "citations": parsed.get("citations", [])
-                or _merge_citations(ctx["a_results"], ctx["c_results"]),
+                "citations": _merge_citations(ctx["a_results"], ctx["c_results"])
+                or parsed.get("citations", []),
                 "retrieved": {
                     "a_module": len(ctx["a_results"]),
                     "c_module": len(ctx["c_results"]),
@@ -619,7 +725,10 @@ class ModuleDAdapter:
         scope = request.topic or request.course_name or request.material_id or "当前课程"
         messages = [
             {"role": "system", "content": SUMMARY_SYSTEM},
-            {"role": "user", "content": f"【多源参考资料】\n{combined}\n\n【总结主题】\n{scope}"},
+            {
+                "role": "user",
+                "content": f"【当前时间】\n{_current_time_text()}\n\n【多源参考资料】\n{combined}\n\n【总结主题】\n{scope}",
+            },
         ]
 
         try:
@@ -678,9 +787,13 @@ class ModuleDAdapter:
             context_blocks.append(f"【相关任务】\n{a_ctx}")
         combined = "\n\n========\n\n".join(context_blocks) or "暂无相关资料。"
 
+        upload_context = "\n\n".join(text.strip() for text in request.upload_texts if text.strip())
+        upload_block = f"\n\n【用户上传材料】\n{upload_context}" if upload_context else ""
         user_msg = (
+            f"【当前时间】\n{_current_time_text()}\n\n"
             f"【作业信息 — A 模块】\n标题：{task_title}\n要求：{task_content or '（无详细描述）'}\n\n"
             f"【多源参考资料】\n{combined}\n\n"
+            f"{upload_block}\n\n"
             f"【学生问题】\n{request.question}"
         )
         messages = [
