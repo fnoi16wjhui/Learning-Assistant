@@ -1190,17 +1190,42 @@ textarea:focus {
   font-size: 12px;
 }
 
-.upload-file-name {
+.upload-file-item.has-preview {
+  align-items: flex-start;
+}
+
+.upload-image-preview {
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border: 1px solid #dfe7f3;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.upload-file-meta {
+  min-width: 0;
   flex: 1;
+}
+
+.upload-file-name {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .upload-file-status {
+  display: block;
+  margin-top: 2px;
   color: #8492a6;
   font-size: 11px;
-  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.upload-file-status.error {
+  color: #b45309;
 }
 
 .upload-file-remove {

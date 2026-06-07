@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost, apiUrl } from "./api";
 
 type AnyRecord = Record<string, any>;
@@ -19,6 +19,16 @@ type Preferences = {
   semesterId: string;
   recentLimit: number;
   taskView: TaskView;
+};
+
+type UploadedFile = {
+  id: string;
+  name: string;
+  text: string;
+  loading: boolean;
+  previewUrl?: string;
+  error?: string;
+  isImage?: boolean;
 };
 
 const pages = [
@@ -81,7 +91,8 @@ export function App() {
   const [hwCourse, setHwCourse] = useState("");
   const [hwTaskId, setHwTaskId] = useState("");
   const [hwQuestion, setHwQuestion] = useState("帮我分析这次作业的完成思路");
-  const [uploadedFiles, setUploadedFiles] = useState<{ name: string; text: string; loading: boolean }[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const uploadedFilesRef = useRef<UploadedFile[]>([]);
 
   const [slowOperation, setSlowOperation] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
@@ -117,6 +128,18 @@ export function App() {
     const timer = window.setTimeout(() => setError(null), 8000);
     return () => window.clearTimeout(timer);
   }, [error]);
+
+  useEffect(() => {
+    uploadedFilesRef.current = uploadedFiles;
+  }, [uploadedFiles]);
+
+  useEffect(() => {
+    return () => {
+      uploadedFilesRef.current.forEach((file) => {
+        if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
+      });
+    };
+  }, []);
 
   useEffect(() => {
     const loading = qaLoading || summaryLoading || homeworkLoading;
@@ -268,7 +291,15 @@ export function App() {
   }
 
   async function uploadFile(file: File) {
-    const entry = { name: file.name, text: "", loading: true };
+    const isImage = file.type.startsWith("image/") || /\.(png|jpe?g|bmp|tiff?|webp)$/i.test(file.name);
+    const entry: UploadedFile = {
+      id: `${file.name}-${file.size}-${file.lastModified}`,
+      name: file.name,
+      text: "",
+      loading: true,
+      previewUrl: isImage ? URL.createObjectURL(file) : undefined,
+      isImage,
+    };
     setUploadedFiles((prev) => [...prev, entry]);
     try {
       const formData = new FormData();
@@ -279,16 +310,29 @@ export function App() {
         throw new Error(data.detail ?? data.message ?? `上传失败: ${response.status}`);
       }
       setUploadedFiles((prev) =>
-        prev.map((f) => (f.name === file.name ? { name: file.name, text: data.text || "", loading: false } : f))
+        prev.map((f) =>
+          f.id === entry.id
+            ? { ...f, text: data.text || "", loading: false, error: undefined }
+            : f,
+        )
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "文件上传失败");
-      setUploadedFiles((prev) => prev.filter((f) => f.name !== file.name));
+      const message = err instanceof Error ? err.message : "文件上传失败";
+      setError(message);
+      setUploadedFiles((prev) =>
+        prev
+          .map((f) => (f.id === entry.id ? { ...f, loading: false, error: message } : f))
+          .filter((f) => f.id !== entry.id || f.previewUrl)
+      );
     }
   }
 
-  function removeUpload(name: string) {
-    setUploadedFiles((prev) => prev.filter((f) => f.name !== name));
+  function removeUpload(id: string) {
+    setUploadedFiles((prev) => {
+      const removed = prev.find((f) => f.id === id);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return prev.filter((f) => f.id !== id);
+    });
   }
 
   async function homeworkAssistant() {
@@ -639,18 +683,28 @@ export function App() {
                   {uploadedFiles.length > 0 && (
                     <div className="upload-file-list">
                       {uploadedFiles.map((f) => (
-                        <div key={f.name} className="upload-file-item">
-                          <span className="upload-file-name">
-                            {f.loading ? "⏳" : "📎"} {f.name}
-                          </span>
-                          {f.loading && <span className="upload-file-status">解析中...</span>}
-                          {!f.loading && f.text && (
-                            <span className="upload-file-status">
-                              {f.text.length} 字符
-                            </span>
+                        <div key={f.id} className={`upload-file-item${f.previewUrl ? " has-preview" : ""}`}>
+                          {f.previewUrl && (
+                            <img className="upload-image-preview" src={f.previewUrl} alt={`${f.name} 预览`} />
                           )}
-                          <button className="upload-file-remove" onClick={() => removeUpload(f.name)}>
-                            ✕
+                          <div className="upload-file-meta">
+                            <span className="upload-file-name">
+                              {f.loading ? "解析中" : f.isImage ? "图片" : "附件"} {f.name}
+                            </span>
+                            {f.loading && <span className="upload-file-status">正在提取文字...</span>}
+                            {!f.loading && f.text && (
+                              <span className="upload-file-status">
+                                已提取 {f.text.length} 字符
+                              </span>
+                            )}
+                            {!f.loading && !f.text && f.error && (
+                              <span className="upload-file-status error">
+                                未提取到文字，可保留图片预览；若需让模型读取图片，请安装/配置 Tesseract OCR。
+                              </span>
+                            )}
+                          </div>
+                          <button className="upload-file-remove" onClick={() => removeUpload(f.id)}>
+                            移除
                           </button>
                         </div>
                       ))}

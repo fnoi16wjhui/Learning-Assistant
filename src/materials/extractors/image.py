@@ -10,6 +10,9 @@ from src.materials.extractors.base import MaterialExtractor, MaterialParseError
 from src.materials.models import MaterialSegment, MaterialType
 
 
+DEFAULT_OCR_LANG = "chi_sim+eng"
+
+
 class ImageOcrExtractor(MaterialExtractor):
     material_type = MaterialType.IMAGE
     suffixes = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
@@ -40,14 +43,23 @@ class ImageOcrExtractor(MaterialExtractor):
 
 
 def ocr_language() -> str:
-    return os.getenv("MATERIAL_OCR_LANG", "chi_sim+eng")
+    return os.getenv("MATERIAL_OCR_LANG", DEFAULT_OCR_LANG)
 
 
 def ocr_pil_image(image: Any, *, lang: str | None = None) -> str:
     """Extract text from an in-memory PIL image through local Tesseract."""
 
     pytesseract = ensure_ocr_available()
-    return pytesseract.image_to_string(image, lang=lang or ocr_language())
+    requested_lang = lang or ocr_language()
+    available = available_ocr_languages(pytesseract)
+    effective_lang = choose_ocr_language(requested_lang, available)
+    try:
+        return pytesseract.image_to_string(image, lang=effective_lang)
+    except Exception as exc:
+        raise MaterialParseError(
+            f"OCR failed with language '{effective_lang}'. "
+            f"Available languages: {', '.join(sorted(available)) or 'none'}."
+        ) from exc
 
 
 def ensure_ocr_available() -> Any:
@@ -72,7 +84,10 @@ def ensure_ocr_available() -> Any:
 def configure_windows_tesseract(pytesseract: Any) -> None:
     """Use common Windows install/user tessdata locations when PATH is stale."""
 
-    if os.name != "nt":
+    explicit_cmd = os.getenv("TESSERACT_CMD")
+    if explicit_cmd:
+        pytesseract.pytesseract.tesseract_cmd = explicit_cmd
+    elif os.name != "nt":
         return
     if not os.getenv("TESSDATA_PREFIX"):
         local_appdata = os.getenv("LOCALAPPDATA")
@@ -86,7 +101,37 @@ def configure_windows_tesseract(pytesseract: Any) -> None:
     for candidate in (
         Path("C:/Program Files/Tesseract-OCR/tesseract.exe"),
         Path("C:/Program Files (x86)/Tesseract-OCR/tesseract.exe"),
+        Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tesseract.exe",
     ):
         if candidate.exists():
             pytesseract.pytesseract.tesseract_cmd = str(candidate)
             return
+
+
+def available_ocr_languages(pytesseract: Any | None = None) -> set[str]:
+    """Return installed Tesseract language IDs, excluding orientation/script data."""
+
+    if pytesseract is None:
+        pytesseract = ensure_ocr_available()
+    try:
+        languages = pytesseract.get_languages(config="")
+    except Exception as exc:
+        raise MaterialParseError(f"Unable to list Tesseract OCR languages: {exc}") from exc
+    return {language for language in languages if language and language != "osd"}
+
+
+def choose_ocr_language(requested: str, available: set[str]) -> str:
+    """Choose the best OCR language string supported by the local Tesseract install."""
+
+    requested_parts = [part for part in requested.split("+") if part]
+    matched = [part for part in requested_parts if part in available]
+    if matched:
+        return "+".join(matched)
+    if "eng" in available:
+        return "eng"
+    if available:
+        return sorted(available)[0]
+    raise MaterialParseError(
+        "No Tesseract OCR language data is installed. "
+        "Install chi_sim.traineddata and eng.traineddata, or set TESSDATA_PREFIX."
+    )
