@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -30,6 +31,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default="storage/attachments")
     parser.add_argument("--manifest", default="storage/attachments/manifest.jsonl")
     parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument(
+        "--include-homework",
+        action="store_true",
+        help="Include pending homework attachments in addition to course files.",
+    )
+    parser.add_argument(
+        "--include-notices",
+        action="store_true",
+        default=True,
+        help="Include notice attachments (enabled by default).",
+    )
+    parser.add_argument(
+        "--exclude-notices",
+        action="store_true",
+        help="Exclude notice attachments.",
+    )
+    parser.add_argument(
+        "--prefer-course-files",
+        action="store_true",
+        default=True,
+        help="Prioritize task_type=file records when limit is reached (enabled by default).",
+    )
+    parser.add_argument(
+        "--no-prefer-course-files",
+        action="store_true",
+        help="Disable course-file prioritization and keep source order.",
+    )
     parser.add_argument("--mailbox", default="INBOX")
     parser.add_argument("--criteria", default="ALL")
     return parser
@@ -42,11 +70,21 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = Path(args.manifest)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    include_notices = bool(args.include_notices and not args.exclude_notices)
+    prefer_course_files = bool(args.prefer_course_files and not args.no_prefer_course_files)
 
     if args.source == "learn":
         if not args.jsonl:
             raise SystemExit("--jsonl is required for Learn attachment export.")
-        count = export_learn_attachments(Path(args.jsonl), output_dir, manifest_path, args.limit)
+        count = export_learn_attachments(
+            Path(args.jsonl),
+            output_dir,
+            manifest_path,
+            args.limit,
+            include_homework=args.include_homework,
+            include_notices=include_notices,
+            prefer_course_files=prefer_course_files,
+        )
     else:
         count = export_mail_attachments(output_dir, manifest_path, args.limit, args.mailbox, args.criteria)
     print(f"exported_attachments={count}")
@@ -69,7 +107,16 @@ def load_exported_keys(manifest_path: Path) -> set[tuple[str, str]]:
     return keys
 
 
-def export_learn_attachments(jsonl_path: Path, output_dir: Path, manifest_path: Path, limit: int) -> int:
+def export_learn_attachments(
+    jsonl_path: Path,
+    output_dir: Path,
+    manifest_path: Path,
+    limit: int,
+    *,
+    include_homework: bool,
+    include_notices: bool,
+    prefer_course_files: bool,
+) -> int:
     adapter = LearnAdapter()
     adapter.authenticate()
     if adapter._session is None:
@@ -77,39 +124,148 @@ def export_learn_attachments(jsonl_path: Path, output_dir: Path, manifest_path: 
     base_url = adapter.require("base_url")
     exported = 0
     already_exported = load_exported_keys(manifest_path)
+    candidates = build_learn_candidates(
+        iter_jsonl(jsonl_path),
+        base_url=base_url,
+        already_exported=already_exported,
+        include_homework=include_homework,
+        include_notices=include_notices,
+        prefer_course_files=prefer_course_files,
+    )
     with manifest_path.open("a", encoding="utf-8") as manifest:
-        for record in iter_jsonl(jsonl_path):
-            if not is_learn_record(record):
-                continue
-            record_raw_id = str(record.get("raw_id") or "")
-            for index, attachment in enumerate(record.get("attachments") or []):
-                if exported >= limit:
-                    return exported
-                url = resolve_download_url(str(attachment.get("download_url") or ""), base_url)
-                name = str(attachment.get("name") or f"attachment_{index + 1}")
-                if (record_raw_id, name) in already_exported:
-                    continue
-                if not url or not is_http_url(url):
-                    continue
-                if not should_keep_document(name, url):
-                    continue
-                response = adapter._session.get(url, headers=adapter._request_headers(), timeout=30)
-                response.raise_for_status()
-                filename = safe_filename(filename_from_response(response.headers.get("Content-Disposition")) or name)
-                target = unique_path(output_dir / f"{safe_filename(record.get('raw_id', 'learn'))}_{index + 1}_{filename}")
-                target.write_bytes(response.content)
-                write_manifest(
-                    manifest,
-                    source="learn",
-                    record_raw_id=record_raw_id,
-                    attachment_name=name,
-                    local_path=target,
-                    bytes_written=len(response.content),
-                    content_type=response.headers.get("Content-Type", "").split(";")[0],
-                )
-                already_exported.add((record_raw_id, name))
-                exported += 1
+        for candidate in candidates:
+            if exported >= limit:
+                return exported
+            response = adapter._session.get(candidate["url"], headers=adapter._request_headers(), timeout=30)
+            response.raise_for_status()
+            filename = safe_filename(
+                filename_from_response(response.headers.get("Content-Disposition")) or candidate["attachment_name"]
+            )
+            target = unique_path(output_dir / build_learn_target_name(candidate, filename))
+            target.write_bytes(response.content)
+            write_manifest(
+                manifest,
+                source="learn",
+                record_raw_id=candidate["record_raw_id"],
+                attachment_name=candidate["attachment_name"],
+                local_path=target,
+                bytes_written=len(response.content),
+                content_type=response.headers.get("Content-Type", "").split(";")[0],
+                course_name=candidate.get("course_name"),
+                task_type=candidate.get("task_type"),
+                title=candidate.get("title"),
+                published_at=candidate.get("published_at"),
+                ddl=candidate.get("ddl"),
+                status=candidate.get("status"),
+            )
+            already_exported.add((candidate["record_raw_id"], candidate["attachment_name"]))
+            exported += 1
     return exported
+
+
+def build_learn_candidates(
+    records: list[dict] | tuple[dict, ...] | object,
+    *,
+    base_url: str,
+    already_exported: set[tuple[str, str]],
+    include_homework: bool,
+    include_notices: bool,
+    prefer_course_files: bool,
+) -> list[dict]:
+    candidates: list[dict] = []
+    for record_index, record in enumerate(records):
+        if not isinstance(record, dict) or not is_learn_record(record):
+            continue
+        task_type = str(record.get("task_type") or "").lower()
+        if task_type == "homework":
+            if not include_homework or not should_include_homework(record):
+                continue
+        elif task_type == "notice":
+            if not include_notices:
+                continue
+        elif task_type == "file":
+            pass
+        else:
+            continue
+        record_raw_id = str(record.get("raw_id") or "")
+        if not record_raw_id:
+            continue
+        for attachment_index, attachment in enumerate(record.get("attachments") or []):
+            if not isinstance(attachment, dict):
+                continue
+            name = str(attachment.get("name") or f"attachment_{attachment_index + 1}")
+            if (record_raw_id, name) in already_exported:
+                continue
+            url = resolve_download_url(str(attachment.get("download_url") or ""), base_url)
+            if not url or not is_http_url(url):
+                continue
+            if not should_keep_document(name, url):
+                continue
+            candidates.append(
+                {
+                    "record_raw_id": record_raw_id,
+                    "attachment_name": name,
+                    "attachment_index": attachment_index,
+                    "url": url,
+                    "task_type": task_type or None,
+                    "course_name": record.get("course_name"),
+                    "title": record.get("title"),
+                    "published_at": record.get("published_at"),
+                    "ddl": record.get("ddl"),
+                    "status": record.get("status"),
+                    "record_index": record_index,
+                }
+            )
+    if not prefer_course_files:
+        return sorted(candidates, key=lambda item: (int(item["record_index"]), int(item["attachment_index"])))
+    return sorted(
+        candidates,
+        key=lambda item: (
+            task_type_priority(str(item.get("task_type") or "")),
+            -published_timestamp(item.get("published_at")),
+            int(item["record_index"]),
+            int(item["attachment_index"]),
+        ),
+    )
+
+
+def should_include_homework(record: dict) -> bool:
+    status = str(record.get("status") or "").lower()
+    if status in {"graded", "submitted_ungraded", "submitted", "submitted_graded"}:
+        return False
+    if record.get("completed") is True:
+        return False
+    ddl = parse_time(record.get("ddl"))
+    if ddl is not None and ddl < datetime.now(ddl.tzinfo):
+        return False
+    return True
+
+
+def task_type_priority(task_type: str) -> int:
+    if task_type == "file":
+        return 0
+    if task_type == "notice":
+        return 1
+    if task_type == "homework":
+        return 2
+    return 9
+
+
+def parse_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def published_timestamp(value: object) -> float:
+    parsed = parse_time(value)
+    if parsed is None:
+        return 0.0
+    return parsed.timestamp()
 
 
 def export_mail_attachments(
@@ -210,6 +366,20 @@ def unique_path(path: Path) -> Path:
     raise RuntimeError(f"Could not allocate unique path for {path}")
 
 
+def build_learn_target_name(candidate: dict, filename: str) -> str:
+    """Build a short, stable learn attachment filename to avoid Windows path limits."""
+
+    source_name = Path(filename).name
+    extension = Path(source_name).suffix
+    stem = Path(source_name).stem
+    short_stem = safe_filename(stem)[:60]
+    short_raw = safe_filename(candidate.get("record_raw_id", "learn"))[:64]
+    index = int(candidate.get("attachment_index", 0)) + 1
+    if extension:
+        return f"{short_raw}_{index}_{short_stem}{extension}"
+    return f"{short_raw}_{index}_{short_stem}"
+
+
 def write_manifest(
     stream,
     *,
@@ -219,6 +389,12 @@ def write_manifest(
     local_path: Path,
     bytes_written: int,
     content_type: str,
+    course_name: str | None = None,
+    task_type: str | None = None,
+    title: str | None = None,
+    published_at: str | None = None,
+    ddl: str | None = None,
+    status: str | None = None,
 ) -> None:
     stream.write(
         json.dumps(
@@ -229,6 +405,12 @@ def write_manifest(
                 "local_path": str(local_path),
                 "bytes": bytes_written,
                 "content_type": content_type,
+                "course_name": course_name,
+                "task_type": task_type,
+                "title": title,
+                "published_at": published_at,
+                "ddl": ddl,
+                "status": status,
             },
             ensure_ascii=False,
         )

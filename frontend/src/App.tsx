@@ -97,6 +97,7 @@ export function App() {
   const [slowOperation, setSlowOperation] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildResult, setRebuildResult] = useState<string | null>(null);
+  const [pipelineMessage, setPipelineMessage] = useState("");
 
   const [settingsStatus, setSettingsStatus] = useState<AnyRecord | null>(null);
   const [localSettings, setLocalSettings] = useState<LocalSettingsForm>(defaultLocalSettingsForm);
@@ -108,7 +109,7 @@ export function App() {
     const [dashboardData, taskData, materialData] = await Promise.all([
       apiGet<AnyRecord>("/api/dashboard"),
       apiGet<AnyRecord>("/api/tasks?limit=200"),
-      apiGet<AnyRecord>("/api/materials?limit=200"),
+      apiGet<AnyRecord>("/api/materials?limit=200&demo_mode=false"),
     ]);
     setDashboard(dashboardData);
     setTasks(taskData.items ?? []);
@@ -193,11 +194,16 @@ export function App() {
     [semesterMaterials, semesterTasks],
   );
   const homeworkCourses = useMemo(() => extractCourses(homeworkTasks), [homeworkTasks]);
-  const summaryFiles = useMemo(
-    () => semesterMaterials.filter(
+  const summaryFiles = useMemo(() => {
+    const scoped = semesterMaterials.filter(
       (material) => !summaryCourse || material.course_name === summaryCourse,
-    ),
-    [semesterMaterials, summaryCourse],
+    );
+    const preferred = scoped.filter((material) => material.data_quality_tag !== "low_priority");
+    return preferred.length > 0 ? preferred : scoped;
+  }, [semesterMaterials, summaryCourse]);
+  const summaryShowingFallbackFiles = useMemo(
+    () => summaryFiles.length > 0 && summaryFiles.every((material) => material.data_quality_tag === "low_priority"),
+    [summaryFiles],
   );
   const homeworkTasksForCourse = useMemo(
     () => homeworkTasks.filter((task) => task.course_name === hwCourse),
@@ -245,7 +251,7 @@ export function App() {
         const after = await learnSyncTimestamp();
         if (after && after !== before) {
           await refreshData();
-          setSyncMessage("已同步到最新");
+          setSyncMessage("已同步到最新，下一步请构建知识库");
           return;
         }
       }
@@ -359,13 +365,25 @@ export function App() {
   async function rebuildKnowledge() {
     setRebuilding(true);
     setRebuildResult(null);
+    setPipelineMessage("正在导出课程资料、解析并构建知识库...");
     setError(null);
     try {
-      const result = await apiPost<AnyRecord>("/api/knowledge/rebuild", {});
-      setRebuildResult(`重建完成：已索引 ${result.indexed_chunks} 个文本块，模式 ${result.index_types?.join("、") ?? "未知"}`);
+      const result = await apiPost<AnyRecord>("/api/materials/build-pipeline", {
+        export_limit: 200,
+        include_homework: false,
+        include_notices: true,
+        prefer_course_files: true,
+        force_rebuild: true,
+        pdf_ocr: false,
+      });
+      const indexed = result.knowledge_status?.indexed_chunks ?? result.knowledge_status?.indexed ?? 0;
+      const parsed = result.material_status?.chunk_count ?? 0;
+      setRebuildResult(`构建完成：已解析 ${parsed} 个资料片段，知识库已索引 ${indexed} 个文本块。`);
+      await refreshData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "知识库重建失败");
+      setError(err instanceof Error ? err.message : "资料导出或知识库构建失败");
     } finally {
+      setPipelineMessage("");
       setRebuilding(false);
     }
   }
@@ -457,7 +475,7 @@ export function App() {
                 {syncing ? "同步中..." : "同步到最新"}
               </button>
               <button className="sync-button secondary-action" onClick={rebuildKnowledge} disabled={rebuilding}>
-                {rebuilding ? "重建中..." : "重新构建知识库索引"}
+                {rebuilding ? "构建中..." : "导出资料并构建知识库"}
               </button>
             </div>
           )}
@@ -478,6 +496,9 @@ export function App() {
               <StatCard title="本学期作业" value={homeworkTasks.length} hint="包含已提交和待完成" />
             </div>
             <Panel title="近期任务" className="recent-panel">
+              {(pipelineMessage || rebuildResult) && (
+                <div className="rebuild-result">{pipelineMessage || rebuildResult}</div>
+              )}
               <RecordList
                 records={recentTasks}
                 empty="当前没有待完成作业"
@@ -571,10 +592,13 @@ export function App() {
                       <option value="">综合当前课程的全部资料</option>
                       {summaryFiles.map((material) => (
                         <option key={materialRecordId(material)} value={materialRecordId(material)}>
-                          {material.title ?? material.file_name ?? "未命名文件"}
+                          {materialOptionLabel(material)}
                         </option>
                       ))}
                     </select>
+                    {summaryShowingFallbackFiles && (
+                      <small className="field-hint">当前课程暂无教师课件，暂显示作业附件作为可选参考。</small>
+                    )}
                   </label>
                 </div>
                 <label className="field summary-question">
@@ -770,7 +794,13 @@ export function App() {
             </div>
             <div className="settings-note">偏好已自动保存在当前浏览器。时间统一按北京时间显示。</div>
             <Panel title="账号与接口设置" className="settings-panel nested-settings-panel">
-              <p className="muted intro">集中配置网络学堂、邮箱和 AI 接口。密码和 API Key 只会增量写入本地 .env，前端不会回显明文。</p>
+              <p className="muted intro">
+                集中配置网络学堂、邮箱和 AI 接口。网络学堂与 AI 接口是完整使用所必需；邮箱和 OCR 是可选增强。
+                密码和 API Key 只会增量写入本地 .env，前端不会回显明文。
+              </p>
+              <div className="settings-note">
+                推荐流程：保存配置后回到“学习概览”，先点击“同步到最新”，再点击“导出资料并构建知识库”。
+              </div>
               {settingsLoading && <p className="muted">加载中...</p>}
               <div className="credential-grid">
                 <section className="credential-section">
@@ -873,7 +903,7 @@ export function App() {
                 <button className="primary" onClick={saveLocalSettings} disabled={settingsSaving}>
                   {settingsSaving ? "保存中..." : "保存账号与接口设置"}
                 </button>
-                {settingsSaved && <span className="save-success">设置已保存，后续同步和问答会使用新配置。</span>}
+                {settingsSaved && <span className="save-success">设置已保存。请回到学习概览同步数据并构建知识库。</span>}
               </div>
               {rebuildResult && <div className="rebuild-result">{rebuildResult}</div>}
             </Panel>
@@ -1352,6 +1382,16 @@ function taskRecordId(record: AnyRecord): string {
 
 function materialRecordId(record: AnyRecord): string {
   return String(record.material_id ?? record.file_hash ?? record.source_file ?? record.chunk_id ?? "");
+}
+
+function materialOptionLabel(record: AnyRecord): string {
+  const title = record.title ?? record.file_name ?? "未命名文件";
+  const prefix = record.data_quality_tag === "low_priority" ? "作业附件 · " : "";
+  const detail = record.content || [
+    record.material_type ? String(record.material_type).toUpperCase() : "",
+    record.chunk_count ? `${record.chunk_count} 个内容片段` : "",
+  ].filter(Boolean).join(" · ");
+  return detail ? `${prefix}${title} · ${detail}` : `${prefix}${title}`;
 }
 
 function recordDescription(record: AnyRecord): string {

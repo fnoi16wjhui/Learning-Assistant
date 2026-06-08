@@ -48,6 +48,11 @@ class ModuleBAdapter:
                 item["material_id"] = str(item.get("file_hash") or source_file)
                 files[source_file] = item
             files[source_file]["chunk_count"] += 1
+            if record.get("material_priority", 1) > files[source_file].get("material_priority", 1):
+                files[source_file]["material_priority"] = record.get("material_priority")
+            if record.get("data_quality_tag"):
+                files[source_file]["data_quality_tag"] = record.get("data_quality_tag")
+                files[source_file]["display_hint"] = record.get("display_hint")
 
         for source_file, item in files.items():
             material_type = str(item.get("material_type") or "file").upper()
@@ -157,6 +162,9 @@ def material_priority(record: dict[str, Any]) -> int:
 
 
 def is_low_value_material(record: dict[str, Any]) -> bool:
+    metadata = record.get("metadata")
+    if isinstance(metadata, dict) and metadata.get("source_task_type") == "homework":
+        return True
     text = material_text(record)
     return any(keyword.lower() in text for keyword in LOW_VALUE_KEYWORDS)
 

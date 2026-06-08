@@ -40,18 +40,20 @@ class PdfExtractor(MaterialExtractor):
                 text = page.extract_text() or ""
             except Exception as exc:
                 raise MaterialParseError(f"PDF page extraction failed: path={path} page={index}") from exc
-            # Attempt to extract and OCR embedded images within the page
-            try:
-                for img_obj in page.images:
-                    try:
-                        pil_image = Image.open(io.BytesIO(img_obj.data))
-                        ocr_text = ocr_pil_image(pil_image)
-                        if ocr_text.strip():
-                            text += "\n" + ocr_text.strip()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            if pdf_ocr_enabled():
+                # Attempt to OCR embedded images. Some slides contain malformed masks,
+                # so keep this behind the same switch as full-page PDF OCR.
+                try:
+                    for img_obj in page.images:
+                        try:
+                            pil_image = Image.open(io.BytesIO(img_obj.data))
+                            ocr_text = ocr_pil_image(pil_image)
+                            if ocr_text.strip():
+                                text += "\n" + ocr_text.strip()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             if len("".join(text.split())) >= min_chars:
                 segments.append(
                     MaterialSegment(
@@ -87,7 +89,7 @@ def extract_pdf_pages_with_ocr(
 ) -> list[MaterialSegment]:
     """Render selected low-text PDF pages and OCR them when local dependencies exist."""
 
-    if os.getenv("MATERIAL_PDF_OCR", "1").lower() in {"0", "false", "no"}:
+    if not pdf_ocr_enabled():
         return []
     try:
         from pdf2image import convert_from_path
@@ -160,3 +162,7 @@ def ocr_warning_segments(pages: list[int], warning: str) -> list[MaterialSegment
         )
         for page in pages
     ]
+
+
+def pdf_ocr_enabled() -> bool:
+    return os.getenv("MATERIAL_PDF_OCR", "1").lower() not in {"0", "false", "no"}

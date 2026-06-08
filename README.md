@@ -11,28 +11,37 @@
 
 ## 快速开始
 
-在仓库根目录执行：
+在仓库根目录安装依赖并启动应用：
 
 ```powershell
 Copy-Item config\.env.example .env
-python scripts\run_harness.py
+pip install -r requirements.txt
+cd frontend
+npm install
+npm run build
+cd ..
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8000/app/
+```
+
+推荐使用页面完成初始化：
+
+1. 进入“偏好设置”，填写网络学堂账号密码和 AI 接口配置。
+2. 回到“学习概览”，点击“同步到最新”。
+3. 同步完成后点击“导出资料并构建知识库”。
+4. 使用“课程问答”“学习总结”“作业助手”。
 
 `.env` 是本地敏感配置文件，不要提交到 Git。当前加载器支持 UTF-8 和 GBK 编码；建议新文件使用 UTF-8。
 
-安装依赖后，可以先做架构 harness：
+开发或诊断时可以运行架构 harness：
 
 ```powershell
 python scripts\run_harness.py
-```
-
-真实联网同步需要显式加 `--allow-network`：
-
-```powershell
-python main.py --channel learn --allow-network --output storage/learn.jsonl
-python main.py --channel mail --allow-network --output storage/mail.jsonl
-python main.py --channel jwch --allow-network --output storage/jwch.jsonl
-python main.py --channel all --allow-network --output storage/collector.jsonl
 ```
 
 ## `.env` 配置
@@ -68,9 +77,9 @@ JWCH_EXTRA_JSON={"login_url":"https://info.tsinghua.edu.cn","username_field":"i_
 # LLM_D_API_KEY    — API 密钥（留空则不带 Authorization 头）
 # LLM_D_MODEL      — 模型名称
 # LLM_D_TIMEOUT    — HTTP 请求超时秒数
-LLM_D_BASE_URL=https://llmapi.paratera.com
+LLM_D_BASE_URL=https://api.deepseek.com
 LLM_D_API_KEY=
-LLM_D_MODEL=deepseek-chat
+LLM_D_MODEL=deepseek-v4-pro
 LLM_D_TIMEOUT=60
 ```
 
@@ -258,10 +267,10 @@ JSONL 中只保存附件元数据；文件本体需要单独导出。
 网络学堂附件：
 
 ```powershell
-python scripts\export_attachments.py --source learn --jsonl storage\learn.jsonl --semester-start 2026-02-01 --limit 50
+python scripts\export_attachments.py --source learn --jsonl storage\collector.jsonl --limit 120 --prefer-course-files --include-notices
 ```
 
-Learn 附件导出默认覆盖旧 manifest，只选择本学期课件，以及本学期中尚未提交或 DDL 尚未到期的作业附件。
+Learn 附件导出默认课件优先，`--include-homework` 未开启时不会把已提交、已批改或已过期的作业附件混入课件列表。导出会追加并去重写入 `storage/attachments/manifest.jsonl`，不会清空已有清单。
 
 邮箱附件：
 
@@ -296,7 +305,13 @@ npm run build
 
 ## 课程资料解析
 
-B 模块负责把本地课程资料解析为 C 模块可索引的标准文本块。默认支持 TXT、Markdown、PDF、DOCX、PPTX、图片、音频/视频。
+B 模块负责把本地课程资料解析为 C 模块可索引的标准文本块。日常使用推荐在首页点击“导出资料并构建知识库”，它会依次完成：
+
+1. 导出网络学堂课件附件。
+2. 解析 `storage/attachments/manifest.jsonl` 中的资料。
+3. 重建 C 模块知识库索引。
+
+命令行诊断时，可以分步执行同样流程。默认支持 TXT、Markdown、PDF、DOCX、PPTX、图片、音频/视频。
 
 **各格式文字提取与图片识别：**
 
@@ -310,6 +325,7 @@ B 模块负责把本地课程资料解析为 C 模块可索引的标准文本块
 | 音频/视频 | `faster-whisper` ASR | — |
 
 PDF、PPTX 和 DOCX 的嵌入图片 OCR 依赖本地安装的 **Tesseract OCR**（需含中文语言包 `chi_sim`）。若 Tesseract 未安装，图片 OCR 静默跳过，不影响文字提取；直接上传图片文件时则会提示 OCR 不可用。OCR 语言默认为 `chi_sim+eng`，可通过 `MATERIAL_OCR_LANG` 环境变量修改。
+如果 PDF 课件中有异常图片导致解析明显变慢，可临时设置 `MATERIAL_PDF_OCR=0` 关闭 PDF 图片 OCR；首页的一键构建默认采用该策略，优先保证课件文字解析完成。
 
 Windows 上可用 `winget` 安装 OCR 引擎：
 

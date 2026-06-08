@@ -69,12 +69,25 @@ class LocalSettingsRequest(BaseModel):
 
 class MaterialExportRequest(BaseModel):
     source: Literal["learn", "mail", "both"] = "learn"
-    limit: int = Field(default=20, ge=1, le=100)
+    limit: int = Field(default=120, ge=1, le=500)
+    include_homework: bool = False
+    include_notices: bool = True
+    prefer_course_files: bool = True
 
 
 class MaterialParseRequest(BaseModel):
     incremental: bool = True
     limit: int | None = Field(default=None, ge=1, le=500)
+
+
+class MaterialPipelineRequest(BaseModel):
+    export_limit: int = Field(default=200, ge=1, le=500)
+    include_homework: bool = False
+    include_notices: bool = True
+    prefer_course_files: bool = True
+    parse_limit: int | None = Field(default=None, ge=1, le=500)
+    force_rebuild: bool = True
+    pdf_ocr: bool = False
 
 
 class KnowledgeRebuildRequest(BaseModel):

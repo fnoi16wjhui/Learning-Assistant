@@ -33,6 +33,7 @@ from backend.app.models import (
     KnowledgeRebuildRequest,
     LocalSettingsRequest,
     MaterialExportRequest,
+    MaterialPipelineRequest,
     MaterialParseRequest,
     QARequest,
     RetrievalRequest,
@@ -65,6 +66,23 @@ module_d = ModuleDAdapter()
 def _run_background(command: list[str], cwd: Path | None = None) -> dict[str, Any]:
     subprocess.Popen(command, cwd=cwd or settings.project_root)
     return {"status": "queued", "command": " ".join(command)}
+
+
+def _run_checked(command: list[str], *, env: dict[str, str] | None = None) -> dict[str, Any]:
+    completed = subprocess.run(
+        command,
+        cwd=settings.project_root,
+        env={**os.environ, **(env or {})},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return {
+        "command": " ".join(command),
+        "returncode": completed.returncode,
+        "stdout": completed.stdout[-4000:],
+        "stderr": completed.stderr[-4000:],
+    }
 
 
 @app.get("/api/health")
@@ -400,7 +418,9 @@ def materials(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
     def _build() -> dict[str, Any]:
-        records = module_b.materials(high_priority_only=high_priority_only or demo_mode, use_demo_fallback=demo_mode)
+        records = module_b.material_files()
+        if high_priority_only:
+            records = [record for record in records if record.get("material_priority", 1) < 2]
         items, warnings = normalize_list_items(records, max_items=limit, demo_mode=demo_mode)
         return module_response(source_module="B", items=items, total=len(records), status=module_b.parse_status()["status"], warnings=warnings)
 
@@ -420,6 +440,16 @@ def export_attachments(request: MaterialExportRequest) -> dict[str, Any]:
             "--limit",
             str(request.limit),
         ]
+        if request.prefer_course_files:
+            command.append("--prefer-course-files")
+        else:
+            command.append("--no-prefer-course-files")
+        if request.include_notices:
+            command.append("--include-notices")
+        else:
+            command.append("--exclude-notices")
+        if request.include_homework:
+            command.append("--include-homework")
         if source == "learn":
             jsonl = settings.collector_jsonl if settings.collector_jsonl.exists() else settings.demo_collector_jsonl
             command.extend(["--jsonl", str(jsonl)])
@@ -452,6 +482,74 @@ def parse_materials(request: MaterialParseRequest) -> dict[str, Any]:
         message="资料解析已在后台启动，完成后请刷新资料页。",
         output_path=str(settings.material_chunks_jsonl),
     )
+
+
+@app.post("/api/materials/build-pipeline")
+def build_material_pipeline(request: MaterialPipelineRequest) -> dict[str, Any]:
+    def _build() -> dict[str, Any]:
+        jsonl = settings.collector_jsonl if settings.collector_jsonl.exists() else settings.demo_collector_jsonl
+        export_command = [
+            sys.executable,
+            str(settings.project_root / "scripts" / "export_attachments.py"),
+            "--source",
+            "learn",
+            "--jsonl",
+            str(jsonl),
+            "--limit",
+            str(request.export_limit),
+        ]
+        export_command.append("--prefer-course-files" if request.prefer_course_files else "--no-prefer-course-files")
+        export_command.append("--include-notices" if request.include_notices else "--exclude-notices")
+        if request.include_homework:
+            export_command.append("--include-homework")
+
+        parse_command = [
+            sys.executable,
+            str(settings.project_root / "scripts" / "parse_materials.py"),
+            "--incremental",
+            "--records-jsonl",
+            str(jsonl),
+            "--output",
+            str(settings.material_chunks_jsonl),
+        ]
+        if request.parse_limit is not None:
+            parse_command.extend(["--limit", str(request.parse_limit)])
+
+        stages: list[dict[str, Any]] = []
+        export_result = _run_checked(export_command)
+        stages.append({"stage": "export_attachments", **export_result})
+        if export_result["returncode"] != 0:
+            return module_response(
+                source_module="B",
+                status="blocked",
+                message="课程附件导出失败。",
+                stages=stages,
+            )
+
+        parse_env = {"MATERIAL_PDF_OCR": "1" if request.pdf_ocr else "0"}
+        parse_result = _run_checked(parse_command, env=parse_env)
+        stages.append({"stage": "parse_materials", **parse_result})
+        if parse_result["returncode"] != 0:
+            return module_response(
+                source_module="B",
+                status="blocked",
+                message="课程资料解析失败。",
+                stages=stages,
+            )
+
+        rebuild_result = module_c.rebuild(force=request.force_rebuild)
+        stages.append({"stage": "rebuild_index", "result": rebuild_result})
+        refresh_summary = module_b.parse_status()
+        return module_response(
+            source_module="B",
+            status="ready",
+            message="课程资料已导出、解析并完成知识库构建。",
+            stages=stages,
+            material_status=refresh_summary,
+            knowledge_status=rebuild_result,
+        )
+
+    return safe_call("B", _build, user_message="资料流水线构建失败，其他页面仍可使用。")
 
 
 @app.post("/api/materials/upload")
